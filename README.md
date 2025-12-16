@@ -1,5 +1,11 @@
 # prestige unique value store
 
+**What is a unique value store?**
+
+A unique value store is a queryable collection of unique values.  In order to maintain the 'unique'-ness of the collection, there must be some mechanism to remove duplicates.
+
+prestige implements this collection as a key-value store.  It is effectively a wrapper around RocksDB, performing deduplication of elements after Put() operations.  
+
 **Why the name 'prestige'?**
 
 In the movie, *The Prestige*, Hugh Jackman's character “deduplicates” himself after every time he performs his version of *The Transported Man* trick:

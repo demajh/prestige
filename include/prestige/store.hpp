@@ -74,6 +74,13 @@ class Store {
   /** Delete user_key mapping and GC objects when unreferenced. */
   rocksdb::Status Delete(std::string_view user_key);
 
+  rocksdb::Status CountKeys(uint64_t* out_key_count) const;
+  rocksdb::Status CountUniqueValues(uint64_t* out_unique_value_count) const;
+
+  rocksdb::Status ListKeys(std::vector<std::string>* out_keys,
+			   uint64_t limit = 0,
+			   std::string_view prefix = {}) const;
+  
   /** Close the store and release RocksDB resources. Safe to call multiple times. */
   void Close();
 

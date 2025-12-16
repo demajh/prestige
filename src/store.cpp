@@ -103,6 +103,102 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
   return db_->Get(ro, objects_cf_, rocksdb::Slice(obj_id), value_bytes_out);
 }
 
+rocksdb::Status Store::CountKeys(uint64_t* out_key_count) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out_key_count) return rocksdb::Status::InvalidArgument("out_key_count is null");
+
+  const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
+  rocksdb::ReadOptions ro;
+  ro.snapshot = snapshot;
+
+  uint64_t count = 0;
+  rocksdb::Status iter_status;
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, user_kv_cf_));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      ++count;
+    }
+    iter_status = it->status();
+  }
+
+  db_->ReleaseSnapshot(snapshot);
+  if (!iter_status.ok()) return iter_status;
+
+  *out_key_count = count;
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::CountUniqueValues(uint64_t* out_unique_value_count) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out_unique_value_count) return rocksdb::Status::InvalidArgument("out_unique_value_count is null");
+
+  const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
+  rocksdb::ReadOptions ro;
+  ro.snapshot = snapshot;
+
+  uint64_t count = 0;
+  rocksdb::Status iter_status;
+  bool decode_failed = false;
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, refcount_cf_));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      uint64_t rc = 0;
+      std::string_view v(it->value().data(), it->value().size());
+      if (!prestige::internal::DecodeU64LE(v, &rc)) {
+        decode_failed = true;
+        break;
+      }
+      if (rc > 0) ++count;
+    }
+    iter_status = it->status();
+  }
+
+  db_->ReleaseSnapshot(snapshot);
+  if (decode_failed) return rocksdb::Status::Corruption("refcount value is not uint64_le");
+  if (!iter_status.ok()) return iter_status;
+
+  *out_unique_value_count = count;
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::ListKeys(std::vector<std::string>* out_keys,
+                                uint64_t limit,
+                                std::string_view prefix) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out_keys) return rocksdb::Status::InvalidArgument("out_keys is null");
+
+  out_keys->clear();
+
+  const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
+  rocksdb::ReadOptions ro;
+  ro.snapshot = snapshot;
+
+  rocksdb::Slice prefix_slice(prefix.data(), prefix.size());
+
+  rocksdb::Status iter_status;
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, user_kv_cf_));
+    if (prefix.empty()) {
+      it->SeekToFirst();
+    } else {
+      it->Seek(prefix_slice);
+    }
+
+    for (; it->Valid(); it->Next()) {
+      if (!prefix.empty() && !it->key().starts_with(prefix_slice)) break;
+      out_keys->emplace_back(it->key().data(), it->key().size());
+      if (limit != 0 && out_keys->size() >= limit) break;
+    }
+
+    iter_status = it->status();
+  }
+
+  db_->ReleaseSnapshot(snapshot);
+  if (!iter_status.ok()) return iter_status;
+
+  return rocksdb::Status::OK();
+}
+  
 rocksdb::Status Store::Delete(std::string_view user_key) {
   if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
   return DeleteImpl(user_key);

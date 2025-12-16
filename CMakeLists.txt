@@ -4,6 +4,11 @@ project(prestige_uvs LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Suppress C++20 extension warnings from RocksDB headers
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+  add_compile_options(-Wno-c++20-extensions)
+endif()
+
 option(PRESTIGE_BUILD_TOOLS "Build CLI/tools" ON)
 option(PRESTIGE_BUILD_EXAMPLES "Build examples" ON)
 
