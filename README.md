@@ -9,31 +9,13 @@ The **prestige unique value store** is a less gruesome, but no less effective wa
 
 ---
 
-## What this repo contains (prototype implementation)
-
-This repository is a small, buildable C++ prototype that implements the “unique value store” design discussed earlier, packaged as a real project:
-
-- A **library** (`prestige::Store`) that wraps **RocksDB TransactionDB** and performs **deduplication on Put**.
-- A small **example program** under `examples/` to validate behavior.
-- A minimal **CLI tool** under `tools/` for manual testing.
-
-### What changed vs a vanilla RocksDB KV store
+### prestige vs a vanilla RocksDB KV store
 
 In vanilla RocksDB, each `Put(key, value)` stores `value` under `key` (so identical values are duplicated across keys). Prestige introduces **indirection**:
 
 - User keys map to **object IDs**
 - Object IDs map to the **actual value bytes**
 - A **dedup index** maps a **content hash** to an object ID so identical values are stored once
-
-### What changed vs the initial single-file sketch
-
-This prototype is intentionally “repo-shaped” rather than “single header”:
-
-- ✅ Split into a **public header** (`include/prestige/store.hpp`) and **implementation** (`src/store.cpp`)
-- ✅ Moved hashing + low-level helpers into `include/prestige/internal.hpp`
-- ✅ Added a **CLI** (`tools/prestige_cli.cpp`) and **example** (`examples/basic.cpp`)
-- ✅ Renamed all Column Families to `prestige_*` to avoid collisions and make on-disk layout self-identifying
-- ✅ Added `prestige_object_meta` (object_id → digest) so garbage-collection can safely remove the dedup index entry for an object
 
 ---
 
@@ -127,6 +109,88 @@ This is a “RocksDB-like” API: users never see object IDs.
 mkdir -p build
 cmake -S . -B build
 cmake --build build -j
+```
+
+Outputs:
+- `prestige_uvs` (library)
+- `prestige_example_basic` (example program)
+- `prestige_cli` (CLI)
+
+---
+
+## Usage
+
+### Example program
+
+```bash
+./build/prestige_example_basic
+```
+
+### CLI
+
+```bash
+# Put values (dedup happens automatically)
+./build/prestige_cli ./prestige_db put k1 HELLO
+./build/prestige_cli ./prestige_db put k2 HELLO
+
+# Read (returns raw bytes)
+./build/prestige_cli ./prestige_db get k2
+
+# Delete keys (GC happens when refcount hits 0)
+./build/prestige_cli ./prestige_db del k1
+./build/prestige_cli ./prestige_db del k2
+```
+
+---
+
+## Configuration
+
+`prestige::Options` (see `include/prestige/store.hpp`):
+
+- `block_cache_bytes`: LRU block cache size for RocksDB table blocks.
+- `bloom_bits_per_key`: bloom filter bits per key (used for point-lookups).
+- `lock_timeout_ms`: TransactionDB lock timeout.
+- `max_retries`: max transaction retries on conflicts / busy statuses.
+- `enable_gc`: whether to immediately delete objects when refcount reaches 0.
+
+---
+
+## Guarantees and trade-offs (prototype)
+
+### Guarantees
+
+- **Exact deduplication**: byte-identical values dedup to a single stored copy.
+- **Atomic updates** across all CFs via a single transaction commit.
+- **Safe overwrite semantics**: overwriting a key updates refcounts and (optionally) reclaims unreferenced objects.
+
+### Trade-offs
+
+- **Read amplification**: GET is two point-reads (key→id, id→value).
+- **Write overhead**: PUT does SHA-256 + multi-CF writes + transactional locking.
+- **Exact-only**: no canonicalization (e.g., JSON normalization), no semantic matching.
+- **Immediate GC**: if enabled, an unreferenced object is deleted as soon as the last key is removed; a later identical Put will re-create it.
+
+---
+
+## Roadmap / TODO
+
+If you want to take this beyond a prototype, the next steps tend to be:
+
+- Inline “small values” directly in `prestige_user_kv` to avoid the second read.
+- Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (amortize transaction cost).
+- Chunk-level dedup (content-defined chunking) for large blobs.
+- Optional value canonicalization before hashing.
+- Background GC / tombstone handling modes (instead of immediate delete).
+- Metrics + tracing hooks (dedup hit rate, txn retries, GC deletes).
+
+---
+
+## License
+
+This repository includes a placeholder `LICENSE` file. Replace it with your chosen license (Apache-2.0 is a common default for infrastructure libraries).
+
+If you redistribute binaries or source that include RocksDB, ensure you comply with RocksDB’s licensing terms as well (RocksDB is commonly distributed under Apache 2.0 / GPLv2 dual-licensing).
+
 
 
 
