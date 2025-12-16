@@ -187,9 +187,7 @@ If you want to take this beyond a prototype, the next steps tend to be:
 
 ## License
 
-This repository includes a placeholder `LICENSE` file. Replace it with your chosen license (Apache-2.0 is a common default for infrastructure libraries).
-
-If you redistribute binaries or source that include RocksDB, ensure you comply with RocksDB’s licensing terms as well (RocksDB is commonly distributed under Apache 2.0 / GPLv2 dual-licensing).
+This code is released on the Apache 2.0 license.  
 
 
 

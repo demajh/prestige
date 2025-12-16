@@ -1,4 +1,3 @@
-\
 #include <prestige/store.hpp>
 
 #include <rocksdb/cache.h>
