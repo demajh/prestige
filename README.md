@@ -226,7 +226,6 @@ Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
 
 If you want to take this beyond a prototype, the next steps tend to be:
 
-- Inline “small values” directly in `prestige_user_kv` to avoid the second read.
 - Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (amortize transaction cost).
 - Chunk-level dedup (content-defined chunking) for large blobs.
 - Optional value canonicalization before hashing.
