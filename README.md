@@ -231,15 +231,9 @@ If you want to take this beyond a prototype, the next steps tend to be:
 - Chunk-level dedup (content-defined chunking) for large blobs.
 - Optional value canonicalization before hashing.
 - Background GC / tombstone handling modes (instead of immediate delete).
-- Metrics + tracing hooks (dedup hit rate, txn retries, GC deletes).
 
 ---
 
 ## License
 
 This code is released on the Apache 2.0 license.  
-
-
-
-
-
