@@ -13,6 +13,35 @@
 
 namespace prestige {
 
+/** A minimal metrics sink interface (counters + histograms). */
+struct MetricsSink {
+  virtual ~MetricsSink() = default;
+
+  /** Monotonic counters (e.g., calls, retries, dedup hits). */
+  virtual void Counter(std::string_view name, uint64_t delta) = 0;
+
+  /** Histograms (e.g., latency in microseconds, sizes in bytes). */
+  virtual void Histogram(std::string_view name, uint64_t value) = 0;
+};
+
+/** A trace span interface (very small surface area). */
+struct TraceSpan {
+  virtual ~TraceSpan() = default;
+
+  virtual void SetAttribute(std::string_view key, uint64_t value) = 0;
+  virtual void SetAttribute(std::string_view key, std::string_view value) = 0;
+  virtual void AddEvent(std::string_view name) = 0;
+
+  /** Must be called exactly once to finish the span. */
+  virtual void End(const rocksdb::Status& status) = 0;
+};
+
+/** A tracer creates spans. If unset, tracing is disabled. */
+struct Tracer {
+  virtual ~Tracer() = default;
+  virtual std::unique_ptr<TraceSpan> StartSpan(std::string_view name) = 0;
+};
+  
 /**
  * Options for the prestige unique value store.
  *
@@ -31,6 +60,14 @@ struct Options {
 
   // GC behavior
   bool enable_gc = true;
+
+  // Observability hooks (optional)
+  //
+  // If set, Store operations will emit a small number of counters/histograms
+  // and attach attributes/events to spans.
+  std::shared_ptr<MetricsSink> metrics;
+  std::shared_ptr<Tracer> tracer;
+  
 };
 
 /**

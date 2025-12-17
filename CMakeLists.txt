@@ -46,6 +46,8 @@ endif()
 if(PRESTIGE_BUILD_EXAMPLES)
   add_executable(prestige_example_basic examples/basic.cpp)
   target_link_libraries(prestige_example_basic PRIVATE prestige_uvs)
+  add_executable(prestige_example_observability examples/observability.cpp)
+  target_link_libraries(prestige_example_observability PRIVATE prestige_uvs)  
 endif()
 
 if(PRESTIGE_BUILD_TOOLS)

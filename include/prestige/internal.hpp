@@ -7,11 +7,19 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <chrono>
 
 #include <rocksdb/status.h>
 
 namespace prestige::internal {
 
+// Monotonic timestamp helper for metrics/tracing (microseconds).
+inline uint64_t NowMicros() {
+  using namespace std::chrono;
+  return static_cast<uint64_t>(
+      duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
+}
+  
 class Sha256 {
  public:
   static constexpr size_t kDigestBytes = 32;

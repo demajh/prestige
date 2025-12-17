@@ -161,6 +161,50 @@ Outputs:
 
 ---
 
+### Observability (metrics + tracing)
+
+Prestige can emit lightweight **metrics** and **traces** if you provide hooks via
+`prestige::Options`:
+
+- `Options::metrics`: a `std::shared_ptr<prestige::MetricsSink>`
+- `Options::tracer`: a `std::shared_ptr<prestige::Tracer>`
+
+When unset (the default), there is essentially no overhead.
+
+#### Metrics emitted
+
+The store emits a small, stable set of counters/histograms (names are strings):
+
+- Get:
+  - Counters: `prestige.get.calls`, `prestige.get.ok_total`, `prestige.get.not_found_total`, `prestige.get.error_total`
+  - Histograms: `prestige.get.latency_us`, `prestige.get.user_lookup_us`, `prestige.get.object_lookup_us`, `prestige.get.value_bytes`
+- Put:
+  - Counters: `prestige.put.calls`, `prestige.put.ok_total`, `prestige.put.timed_out_total`, `prestige.put.error_total`,
+    `prestige.put.retry_total`, `prestige.put.dedup_hit_total`, `prestige.put.dedup_miss_total`,
+    `prestige.put.object_created_total`, `prestige.put.noop_overwrite_total`
+  - Histograms: `prestige.put.latency_us`, `prestige.put.sha256_us`, `prestige.put.commit_us`, `prestige.put.value_bytes`, `prestige.put.attempts`
+- Delete:
+  - Counters: `prestige.delete.calls`, `prestige.delete.ok_total`, `prestige.delete.not_found_total`, `prestige.delete.timed_out_total`, `prestige.delete.error_total`, `prestige.delete.retry_total`
+  - Histograms: `prestige.delete.latency_us`, `prestige.delete.commit_us`, `prestige.delete.attempts`
+- GC (immediate mode):
+  - Counter: `prestige.gc.deleted_objects_total`
+
+#### Tracing emitted
+
+If `Options::tracer` is set, the store emits spans:
+
+- `prestige.Get`
+- `prestige.Put`
+- `prestige.Delete`
+
+Attributes include common fields like `key_bytes`, `value_bytes`, `latency_us`,
+`attempts`, `dedup_hit`, and a coarse `status` label.
+
+Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
+`gc.delete_object`).
+
+---
+
 ## Guarantees and trade-offs (prototype)
 
 ### Guarantees

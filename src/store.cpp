@@ -19,6 +19,52 @@ constexpr const char* kDedupIndexCF  = "prestige_dedup_index";
 constexpr const char* kRefcountCF    = "prestige_refcount";
 constexpr const char* kObjectMetaCF  = "prestige_object_meta";
 
+// --------------------------
+// Observability helpers
+// --------------------------
+inline void EmitCounter(const prestige::Options& opt,
+                        std::string_view name,
+                        uint64_t delta = 1) {
+  if (opt.metrics) opt.metrics->Counter(name, delta);
+}
+
+inline void EmitHistogram(const prestige::Options& opt,
+                          std::string_view name,
+                          uint64_t value) {
+  if (opt.metrics) opt.metrics->Histogram(name, value);
+}
+
+// Map RocksDB statuses to low-cardinality strings for tracing.
+// (Avoid putting status.ToString() into attributes; it's high-cardinality.)
+inline std::string_view StatusKind(const rocksdb::Status& s) {
+  if (s.ok()) return "ok";
+  if (s.IsNotFound()) return "not_found";
+  if (s.IsInvalidArgument()) return "invalid_argument";
+  if (s.IsTimedOut()) return "timed_out";
+  if (s.IsBusy()) return "busy";
+  if (s.IsTryAgain()) return "try_again";
+  if (s.IsAborted()) return "aborted";
+  if (s.IsCorruption()) return "corruption";
+  if (s.IsIOError()) return "io_error";
+  return "other";
+}
+
+inline void SpanAttr(prestige::TraceSpan* span,
+                     std::string_view key,
+                     uint64_t value) {
+  if (span) span->SetAttribute(key, value);
+}
+
+inline void SpanAttr(prestige::TraceSpan* span,
+                     std::string_view key,
+                     std::string_view value) {
+  if (span) span->SetAttribute(key, value);
+}
+
+inline void SpanEvent(prestige::TraceSpan* span, std::string_view name) {
+  if (span) span->AddEvent(name);
+}
+  
 // Helper: build a ColumnFamilyOptions with shared cache + bloom
 rocksdb::ColumnFamilyOptions MakeCFOptions(const std::shared_ptr<rocksdb::Cache>& cache,
                                            int bloom_bits_per_key) {
@@ -95,12 +141,58 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
   if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
   if (!value_bytes_out) return rocksdb::Status::InvalidArgument("value_bytes_out is null");
 
-  rocksdb::ReadOptions ro;
-  std::string obj_id;
-  rocksdb::Status s = db_->Get(ro, user_kv_cf_, rocksdb::Slice(user_key.data(), user_key.size()), &obj_id);
-  if (!s.ok()) return s;
+  EmitCounter(opt_, "prestige.get.calls", 1);
 
-  return db_->Get(ro, objects_cf_, rocksdb::Slice(obj_id), value_bytes_out);
+  const uint64_t op_start_us = prestige::internal::NowMicros();
+  std::unique_ptr<TraceSpan> span;
+  if (opt_.tracer) span = opt_.tracer->StartSpan("prestige.Get");
+  SpanAttr(span.get(), "key_bytes", static_cast<uint64_t>(user_key.size()));
+
+  auto finish = [&](const rocksdb::Status& st) -> rocksdb::Status {
+    const uint64_t dur_us = prestige::internal::NowMicros() - op_start_us;
+    EmitHistogram(opt_, "prestige.get.latency_us", dur_us);
+
+    if (st.ok()) {
+      EmitCounter(opt_, "prestige.get.ok_total", 1);
+    } else if (st.IsNotFound()) {
+      EmitCounter(opt_, "prestige.get.not_found_total", 1);
+    } else {
+      EmitCounter(opt_, "prestige.get.error_total", 1);
+    }
+
+    if (span) {
+      SpanAttr(span.get(), "latency_us", dur_us);
+      SpanAttr(span.get(), "status", StatusKind(st));
+      span->End(st);
+    }
+    return st;
+  };
+
+  rocksdb::ReadOptions ro;
+
+  // 1) user_key -> object_id
+  std::string obj_id;
+  const uint64_t map_start_us = prestige::internal::NowMicros();
+  rocksdb::Status s = db_->Get(
+      ro, user_kv_cf_,
+      rocksdb::Slice(user_key.data(), user_key.size()),
+      &obj_id);
+  EmitHistogram(opt_, "prestige.get.user_lookup_us",
+                prestige::internal::NowMicros() - map_start_us);
+  if (!s.ok()) return finish(s);
+
+  // 2) object_id -> value_bytes
+  const uint64_t obj_start_us = prestige::internal::NowMicros();
+  rocksdb::Status s2 = db_->Get(ro, objects_cf_, rocksdb::Slice(obj_id), value_bytes_out);
+  EmitHistogram(opt_, "prestige.get.object_lookup_us",
+                prestige::internal::NowMicros() - obj_start_us);
+
+  if (s2.ok()) {
+    EmitHistogram(opt_, "prestige.get.value_bytes",
+                  static_cast<uint64_t>(value_bytes_out->size()));
+  }
+
+  return finish(s2);
 }
 
 rocksdb::Status Store::CountKeys(uint64_t* out_key_count) const {
@@ -298,9 +390,50 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
 }
 
 rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value_bytes) {
+  EmitCounter(opt_, "prestige.put.calls", 1);
+  EmitHistogram(opt_, "prestige.put.value_bytes", static_cast<uint64_t>(value_bytes.size()));
+
+  const uint64_t op_start_us = prestige::internal::NowMicros();
+  std::unique_ptr<TraceSpan> span;
+  if (opt_.tracer) span = opt_.tracer->StartSpan("prestige.Put");
+  SpanAttr(span.get(), "key_bytes", static_cast<uint64_t>(user_key.size()));
+  SpanAttr(span.get(), "value_bytes", static_cast<uint64_t>(value_bytes.size()));
+
   // Compute SHA-256 digest as dedup key
+  const uint64_t sha_start_us = prestige::internal::NowMicros();
   auto digest = prestige::internal::Sha256::Digest(value_bytes);
+  EmitHistogram(opt_, "prestige.put.sha256_us", prestige::internal::NowMicros() - sha_start_us);
   std::string digest_key = prestige::internal::ToBytes(digest.data(), digest.size());
+
+  bool dedup_hit_final = false;
+  bool had_old_final = false;
+  bool noop_overwrite = false;
+  int attempts_used = 0;
+
+  auto finish = [&](const rocksdb::Status& st) -> rocksdb::Status {
+    const uint64_t dur_us = prestige::internal::NowMicros() - op_start_us;
+    EmitHistogram(opt_, "prestige.put.latency_us", dur_us);
+    EmitHistogram(opt_, "prestige.put.attempts", static_cast<uint64_t>(attempts_used));
+
+    if (st.ok()) {
+      EmitCounter(opt_, "prestige.put.ok_total", 1);
+    } else if (st.IsTimedOut()) {
+      EmitCounter(opt_, "prestige.put.timed_out_total", 1);
+    } else {
+      EmitCounter(opt_, "prestige.put.error_total", 1);
+    }
+
+    if (span) {
+      SpanAttr(span.get(), "latency_us", dur_us);
+      SpanAttr(span.get(), "attempts", static_cast<uint64_t>(attempts_used));
+      SpanAttr(span.get(), "dedup_hit", static_cast<uint64_t>(dedup_hit_final ? 1 : 0));
+      SpanAttr(span.get(), "had_old", static_cast<uint64_t>(had_old_final ? 1 : 0));
+      SpanAttr(span.get(), "noop_overwrite", static_cast<uint64_t>(noop_overwrite ? 1 : 0));
+      SpanAttr(span.get(), "status", StatusKind(st));
+      span->End(st);
+    }
+    return st;
+  };
 
   rocksdb::WriteOptions wo;
   rocksdb::ReadOptions ro;
@@ -309,21 +442,29 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
   to.lock_timeout = opt_.lock_timeout_ms;
 
   for (int attempt = 0; attempt < opt_.max_retries; ++attempt) {
+    attempts_used = attempt + 1;
+
     std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
-    if (!txn) return rocksdb::Status::IOError("BeginTransaction returned null");
+    if (!txn) return finish(rocksdb::Status::IOError("BeginTransaction returned null"));
 
     // Lock user_key mapping (detect overwrite)
     std::string old_obj_id;
     bool had_old = false;
     {
-      rocksdb::Status s = txn->GetForUpdate(ro, user_kv_cf_,
-                                           rocksdb::Slice(user_key.data(), user_key.size()),
-                                           &old_obj_id);
+      rocksdb::Status s = txn->GetForUpdate(
+          ro, user_kv_cf_,
+          rocksdb::Slice(user_key.data(), user_key.size()),
+          &old_obj_id);
+
       if (s.ok()) {
         had_old = true;
       } else if (!s.IsNotFound()) {
-        if (prestige::internal::IsRetryableTxnStatus(s)) continue;
-        return s;
+        if (prestige::internal::IsRetryableTxnStatus(s)) {
+          EmitCounter(opt_, "prestige.put.retry_total", 1);
+          SpanEvent(span.get(), "retry.user_key_lock");
+          continue;
+        }
+        return finish(s);
       }
     }
 
@@ -331,76 +472,138 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
     std::string obj_id;
     {
       rocksdb::Status s = txn->GetForUpdate(ro, dedup_cf_, rocksdb::Slice(digest_key), &obj_id);
+
       if (s.IsNotFound()) {
+        EmitCounter(opt_, "prestige.put.dedup_miss_total", 1);
+        EmitCounter(opt_, "prestige.put.object_created_total", 1);
+        dedup_hit_final = false;
+
         auto new_id = prestige::internal::RandomObjectId128();
         obj_id = prestige::internal::ToBytes(new_id.data(), new_id.size());
 
         // Create: object bytes, meta, digest->obj_id, refcount initialized to 0
         s = txn->Put(objects_cf_, rocksdb::Slice(obj_id),
                      rocksdb::Slice(value_bytes.data(), value_bytes.size()));
-        if (!s.ok()) return s;
+        if (!s.ok()) return finish(s);
 
         s = txn->Put(meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(digest_key));
-        if (!s.ok()) return s;
+        if (!s.ok()) return finish(s);
 
         s = txn->Put(dedup_cf_, rocksdb::Slice(digest_key), rocksdb::Slice(obj_id));
-        if (!s.ok()) return s;
+        if (!s.ok()) return finish(s);
 
         s = txn->Put(refcount_cf_, rocksdb::Slice(obj_id),
                      rocksdb::Slice(prestige::internal::EncodeU64LE(0)));
-        if (!s.ok()) return s;
+        if (!s.ok()) return finish(s);
+
       } else if (!s.ok()) {
-        if (prestige::internal::IsRetryableTxnStatus(s)) continue;
-        return s;
+        if (prestige::internal::IsRetryableTxnStatus(s)) {
+          EmitCounter(opt_, "prestige.put.retry_total", 1);
+          SpanEvent(span.get(), "retry.dedup_lock");
+          continue;
+        }
+        return finish(s);
+
+      } else {
+        EmitCounter(opt_, "prestige.put.dedup_hit_total", 1);
+        dedup_hit_final = true;
       }
     }
 
+    had_old_final = had_old;
+
     // If overwrite maps to same object_id, nothing to do
     if (had_old && old_obj_id == obj_id) {
+      noop_overwrite = true;
+      EmitCounter(opt_, "prestige.put.noop_overwrite_total", 1);
       txn->Rollback();
-      return rocksdb::Status::OK();
+      return finish(rocksdb::Status::OK());
     }
 
     // user_key -> obj_id
     {
-      rocksdb::Status s = txn->Put(user_kv_cf_,
-                                   rocksdb::Slice(user_key.data(), user_key.size()),
-                                   rocksdb::Slice(obj_id));
-      if (!s.ok()) return s;
+      rocksdb::Status s = txn->Put(
+          user_kv_cf_,
+          rocksdb::Slice(user_key.data(), user_key.size()),
+          rocksdb::Slice(obj_id));
+      if (!s.ok()) return finish(s);
     }
 
     // Incref(new)
     {
       uint64_t new_cnt = 0;
       rocksdb::Status s = AdjustRefcountLocked(txn.get(), refcount_cf_, obj_id, +1, &new_cnt);
-      if (!s.ok()) return s;
+      if (!s.ok()) return finish(s);
     }
 
     // Decref(old) and GC if needed
     if (had_old && old_obj_id != obj_id) {
       uint64_t old_cnt = 0;
       rocksdb::Status s = AdjustRefcountLocked(txn.get(), refcount_cf_, old_obj_id, -1, &old_cnt);
-      if (!s.ok()) return s;
+      if (!s.ok()) return finish(s);
 
       if (opt_.enable_gc && old_cnt == 0) {
-        s = DeleteObjectIfUnreferencedLocked(txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, old_obj_id);
-        if (!s.ok()) return s;
+        s = DeleteObjectIfUnreferencedLocked(
+            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, old_obj_id);
+        if (!s.ok()) return finish(s);
+
+        EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
+        SpanEvent(span.get(), "gc.delete_object");
       }
     }
 
+    const uint64_t commit_start_us = prestige::internal::NowMicros();
     rocksdb::Status cs = txn->Commit();
-    if (cs.ok()) return cs;
+    EmitHistogram(opt_, "prestige.put.commit_us", prestige::internal::NowMicros() - commit_start_us);
+
+    if (cs.ok()) return finish(cs);
 
     if (prestige::internal::IsRetryableTxnStatus(cs)) {
-      continue;  // retry
+      EmitCounter(opt_, "prestige.put.retry_total", 1);
+      SpanEvent(span.get(), "retry.commit");
+      continue;
     }
-    return cs;
+
+    return finish(cs);
   }
 
-  return rocksdb::Status::TimedOut("Put exceeded max_retries");
+  return finish(rocksdb::Status::TimedOut("Put exceeded max_retries"));
 }
 
 rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
+  EmitCounter(opt_, "prestige.delete.calls", 1);
+
+  const uint64_t op_start_us = prestige::internal::NowMicros();
+  std::unique_ptr<TraceSpan> span;
+  if (opt_.tracer) span = opt_.tracer->StartSpan("prestige.Delete");
+  SpanAttr(span.get(), "key_bytes", static_cast<uint64_t>(user_key.size()));
+
+  int attempts_used = 0;
+
+  auto finish = [&](const rocksdb::Status& st) -> rocksdb::Status {
+    const uint64_t dur_us = prestige::internal::NowMicros() - op_start_us;
+    EmitHistogram(opt_, "prestige.delete.latency_us", dur_us);
+    EmitHistogram(opt_, "prestige.delete.attempts", static_cast<uint64_t>(attempts_used));
+
+    if (st.ok()) {
+      EmitCounter(opt_, "prestige.delete.ok_total", 1);
+    } else if (st.IsNotFound()) {
+      EmitCounter(opt_, "prestige.delete.not_found_total", 1);
+    } else if (st.IsTimedOut()) {
+      EmitCounter(opt_, "prestige.delete.timed_out_total", 1);
+    } else {
+      EmitCounter(opt_, "prestige.delete.error_total", 1);
+    }
+
+    if (span) {
+      SpanAttr(span.get(), "latency_us", dur_us);
+      SpanAttr(span.get(), "attempts", static_cast<uint64_t>(attempts_used));
+      SpanAttr(span.get(), "status", StatusKind(st));
+      span->End(st);
+    }
+    return st;
+  };
+
   rocksdb::WriteOptions wo;
   rocksdb::ReadOptions ro;
 
@@ -408,41 +611,63 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
   to.lock_timeout = opt_.lock_timeout_ms;
 
   for (int attempt = 0; attempt < opt_.max_retries; ++attempt) {
+    attempts_used = attempt + 1;
+
     std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
-    if (!txn) return rocksdb::Status::IOError("BeginTransaction returned null");
+    if (!txn) return finish(rocksdb::Status::IOError("BeginTransaction returned null"));
 
     // Lock and fetch mapping
     std::string obj_id;
-    rocksdb::Status s = txn->GetForUpdate(ro, user_kv_cf_,
-                                         rocksdb::Slice(user_key.data(), user_key.size()),
-                                         &obj_id);
-    if (s.IsNotFound()) return s;
+    rocksdb::Status s = txn->GetForUpdate(
+        ro, user_kv_cf_,
+        rocksdb::Slice(user_key.data(), user_key.size()),
+        &obj_id);
+
+    if (s.IsNotFound()) return finish(s);
     if (!s.ok()) {
-      if (prestige::internal::IsRetryableTxnStatus(s)) continue;
-      return s;
+      if (prestige::internal::IsRetryableTxnStatus(s)) {
+        EmitCounter(opt_, "prestige.delete.retry_total", 1);
+        SpanEvent(span.get(), "retry.user_key_lock");
+        continue;
+      }
+      return finish(s);
     }
 
     // Remove user mapping
     s = txn->Delete(user_kv_cf_, rocksdb::Slice(user_key.data(), user_key.size()));
-    if (!s.ok()) return s;
+    if (!s.ok()) return finish(s);
 
     // Decref and maybe GC
     uint64_t cnt = 0;
     s = AdjustRefcountLocked(txn.get(), refcount_cf_, obj_id, -1, &cnt);
-    if (!s.ok()) return s;
+    if (!s.ok()) return finish(s);
 
     if (opt_.enable_gc && cnt == 0) {
-      s = DeleteObjectIfUnreferencedLocked(txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, obj_id);
-      if (!s.ok()) return s;
+      s = DeleteObjectIfUnreferencedLocked(
+          txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, obj_id);
+      if (!s.ok()) return finish(s);
+
+      EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
+      SpanEvent(span.get(), "gc.delete_object");
     }
 
+    const uint64_t commit_start_us = prestige::internal::NowMicros();
     rocksdb::Status cs = txn->Commit();
-    if (cs.ok()) return cs;
-    if (prestige::internal::IsRetryableTxnStatus(cs)) continue;
-    return cs;
+    EmitHistogram(opt_, "prestige.delete.commit_us",
+                  prestige::internal::NowMicros() - commit_start_us);
+
+    if (cs.ok()) return finish(cs);
+
+    if (prestige::internal::IsRetryableTxnStatus(cs)) {
+      EmitCounter(opt_, "prestige.delete.retry_total", 1);
+      SpanEvent(span.get(), "retry.commit");
+      continue;
+    }
+
+    return finish(cs);
   }
 
-  return rocksdb::Status::TimedOut("Delete exceeded max_retries");
+  return finish(rocksdb::Status::TimedOut("Delete exceeded max_retries"));
 }
 
 }  // namespace prestige
