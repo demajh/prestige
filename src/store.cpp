@@ -9,6 +9,11 @@
 
 #include <prestige/internal.hpp>
 
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+#include <prestige/embedder.hpp>
+#include <prestige/vector_index.hpp>
+#endif
+
 namespace prestige {
 
 namespace {
@@ -18,6 +23,9 @@ constexpr const char* kObjectStoreCF = "prestige_object_store";
 constexpr const char* kDedupIndexCF  = "prestige_dedup_index";
 constexpr const char* kRefcountCF    = "prestige_refcount";
 constexpr const char* kObjectMetaCF  = "prestige_object_meta";
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+constexpr const char* kEmbeddingsCF  = "prestige_embeddings";
+#endif
 
 // --------------------------
 // Observability helpers
@@ -89,6 +97,26 @@ rocksdb::Status Store::Open(const std::string& db_path,
                             const Options& opt) {
   if (!out) return rocksdb::Status::InvalidArgument("out is null");
 
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  // Validate semantic mode options
+  if (opt.dedup_mode == DedupMode::kSemantic) {
+    if (opt.semantic_model_path.empty()) {
+      return rocksdb::Status::InvalidArgument(
+          "semantic_model_path is required when dedup_mode == kSemantic");
+    }
+    if (opt.semantic_threshold < 0.0f || opt.semantic_threshold > 1.0f) {
+      return rocksdb::Status::InvalidArgument(
+          "semantic_threshold must be in range [0.0, 1.0] when dedup_mode == kSemantic");
+    }
+  }
+#else
+  // Semantic mode requested but not compiled in
+  if (opt.dedup_mode == DedupMode::kSemantic) {
+    return rocksdb::Status::InvalidArgument(
+        "Semantic dedup not enabled. Rebuild with PRESTIGE_ENABLE_SEMANTIC=ON");
+  }
+#endif
+
   auto store = std::unique_ptr<Store>(new Store(opt));
 
   // RocksDB options
@@ -109,6 +137,13 @@ rocksdb::Status Store::Open(const std::string& db_path,
   cfs.emplace_back(kRefcountCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kObjectMetaCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
 
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  // Add embeddings CF for semantic mode
+  if (opt.dedup_mode == DedupMode::kSemantic) {
+    cfs.emplace_back(kEmbeddingsCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
+  }
+#endif
+
   std::vector<rocksdb::ColumnFamilyHandle*> handles;
   rocksdb::TransactionDB* db = nullptr;
 
@@ -127,6 +162,50 @@ rocksdb::Status Store::Open(const std::string& db_path,
   store->dedup_cf_   = store->handles_[3];
   store->refcount_cf_= store->handles_[4];
   store->meta_cf_    = store->handles_[5];
+
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  // Initialize semantic dedup components
+  if (opt.dedup_mode == DedupMode::kSemantic) {
+    store->embeddings_cf_ = store->handles_[6];
+
+    // Create embedder
+    std::string embedder_error;
+    store->embedder_ = internal::Embedder::Create(
+        opt.semantic_model_path,
+        opt.semantic_model_type == SemanticModel::kMiniLM
+            ? internal::EmbedderModelType::kMiniLM
+            : internal::EmbedderModelType::kBGESmall,
+        &embedder_error);
+
+    if (!store->embedder_) {
+      store->Close();
+      return rocksdb::Status::InvalidArgument(
+          "Failed to create embedder: " + embedder_error);
+    }
+
+    // Create vector index
+    size_t dimension = store->embedder_->Dimension();
+    store->vector_index_ = internal::CreateHNSWIndex(
+        dimension,
+        10000,  // Initial max elements (will grow as needed)
+        opt.hnsw_m,
+        opt.hnsw_ef_construction);
+
+    if (!store->vector_index_) {
+      store->Close();
+      return rocksdb::Status::InvalidArgument("Failed to create vector index");
+    }
+
+    store->vector_index_->SetSearchParam("ef_search", opt.hnsw_ef_search);
+
+    // Load existing index if present
+    store->vector_index_path_ = db_path + ".vec_index";
+    if (!store->vector_index_->Load(store->vector_index_path_)) {
+      // Load failure is not fatal if the file doesn't exist yet
+      // But if it exists and is corrupt, we should warn (for now just continue)
+    }
+  }
+#endif
 
   *out = std::move(store);
   return rocksdb::Status::OK();
@@ -298,6 +377,19 @@ rocksdb::Status Store::Delete(std::string_view user_key) {
 
 void Store::Close() {
   if (!db_) return;
+
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  // Save vector index before closing
+  if (vector_index_ && !vector_index_path_.empty()) {
+    vector_index_->Save(vector_index_path_);
+  }
+
+  // Release semantic resources
+  vector_index_.reset();
+  embedder_.reset();
+  embeddings_cf_ = nullptr;
+#endif
+
   for (auto* h : handles_) delete h;
   handles_.clear();
   delete db_;
@@ -399,7 +491,14 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
   SpanAttr(span.get(), "key_bytes", static_cast<uint64_t>(user_key.size()));
   SpanAttr(span.get(), "value_bytes", static_cast<uint64_t>(value_bytes.size()));
 
-  // Compute SHA-256 digest as dedup key
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  // For semantic mode, compute embedding instead of SHA-256
+  if (opt_.dedup_mode == DedupMode::kSemantic) {
+    return PutImplSemantic(user_key, value_bytes, span.get(), op_start_us);
+  }
+#endif
+
+  // Exact mode: Compute SHA-256 digest as dedup key
   const uint64_t sha_start_us = prestige::internal::NowMicros();
   auto digest = prestige::internal::Sha256::Digest(value_bytes);
   EmitHistogram(opt_, "prestige.put.sha256_us", prestige::internal::NowMicros() - sha_start_us);
@@ -643,8 +742,17 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
     if (!s.ok()) return finish(s);
 
     if (opt_.enable_gc && cnt == 0) {
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+      if (opt_.dedup_mode == DedupMode::kSemantic) {
+        s = DeleteSemanticObject(txn.get(), obj_id);
+      } else {
+        s = DeleteObjectIfUnreferencedLocked(
+            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, obj_id);
+      }
+#else
       s = DeleteObjectIfUnreferencedLocked(
           txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, obj_id);
+#endif
       if (!s.ok()) return finish(s);
 
       EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
@@ -669,5 +777,260 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
 
   return finish(rocksdb::Status::TimedOut("Delete exceeded max_retries"));
 }
+
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+
+rocksdb::Status Store::DeleteSemanticObject(rocksdb::Transaction* txn,
+                                             const std::string& obj_id) {
+  if (!txn) return rocksdb::Status::InvalidArgument("txn is null");
+
+  rocksdb::ReadOptions ro;
+
+  // Mark as deleted in vector index (soft delete)
+  if (vector_index_) {
+    vector_index_->MarkDeleted(obj_id);
+  }
+
+  // Delete embedding from embeddings CF
+  rocksdb::Status s = txn->Delete(embeddings_cf_, rocksdb::Slice(obj_id));
+  if (!s.ok() && !s.IsNotFound()) return s;
+
+  // Remove object bytes
+  s = txn->Delete(objects_cf_, rocksdb::Slice(obj_id));
+  if (!s.ok()) return s;
+
+  // Remove refcount
+  s = txn->Delete(refcount_cf_, rocksdb::Slice(obj_id));
+  if (!s.ok()) return s;
+
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
+                                        std::string_view value_bytes,
+                                        TraceSpan* span,
+                                        uint64_t op_start_us) {
+  // Compute embedding for the value
+  const uint64_t embed_start_us = prestige::internal::NowMicros();
+
+  // Truncate text if needed
+  std::string_view text_to_embed = value_bytes;
+  if (text_to_embed.size() > opt_.semantic_max_text_bytes) {
+    text_to_embed = text_to_embed.substr(0, opt_.semantic_max_text_bytes);
+  }
+
+  auto embed_result = embedder_->Embed(text_to_embed);
+  EmitHistogram(opt_, "prestige.put.embed_us",
+                prestige::internal::NowMicros() - embed_start_us);
+
+  if (!embed_result.success) {
+    EmitCounter(opt_, "prestige.put.embed_error_total", 1);
+    return rocksdb::Status::Corruption(
+        "Embedding failed: " + embed_result.error_message);
+  }
+
+  const std::vector<float>& embedding = embed_result.embedding;
+  std::string embedding_bytes = prestige::internal::SerializeEmbedding(embedding);
+
+  bool dedup_hit_final = false;
+  bool had_old_final = false;
+  bool noop_overwrite = false;
+  int attempts_used = 0;
+
+  auto finish = [&](const rocksdb::Status& st) -> rocksdb::Status {
+    const uint64_t dur_us = prestige::internal::NowMicros() - op_start_us;
+    EmitHistogram(opt_, "prestige.put.latency_us", dur_us);
+    EmitHistogram(opt_, "prestige.put.attempts", static_cast<uint64_t>(attempts_used));
+
+    if (st.ok()) {
+      EmitCounter(opt_, "prestige.put.ok_total", 1);
+    } else if (st.IsTimedOut()) {
+      EmitCounter(opt_, "prestige.put.timed_out_total", 1);
+    } else {
+      EmitCounter(opt_, "prestige.put.error_total", 1);
+    }
+
+    if (span) {
+      SpanAttr(span, "latency_us", dur_us);
+      SpanAttr(span, "attempts", static_cast<uint64_t>(attempts_used));
+      SpanAttr(span, "dedup_hit", static_cast<uint64_t>(dedup_hit_final ? 1 : 0));
+      SpanAttr(span, "had_old", static_cast<uint64_t>(had_old_final ? 1 : 0));
+      SpanAttr(span, "noop_overwrite", static_cast<uint64_t>(noop_overwrite ? 1 : 0));
+      SpanAttr(span, "status", StatusKind(rocksdb::Status::OK()));
+      span->End(st);
+    }
+    return st;
+  };
+
+  rocksdb::WriteOptions wo;
+  rocksdb::ReadOptions ro;
+
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+
+  // Search vector index for similar embeddings (outside transaction)
+  const uint64_t search_start_us = prestige::internal::NowMicros();
+  auto candidates = vector_index_->Search(embedding, opt_.semantic_search_k);
+  EmitHistogram(opt_, "prestige.semantic.lookup_us",
+                prestige::internal::NowMicros() - search_start_us);
+  EmitHistogram(opt_, "prestige.semantic.candidates_checked",
+                static_cast<uint64_t>(candidates.size()));
+
+  // Check candidates for similarity match
+  // L2 distance for normalized vectors: d = 2 * (1 - cos_sim)
+  // So cos_sim = 1 - d/2
+  // We want cos_sim >= threshold, which means d <= 2 * (1 - threshold)
+  float max_l2_dist = 2.0f * (1.0f - opt_.semantic_threshold);
+  std::string matched_obj_id;
+
+  for (const auto& candidate : candidates) {
+    if (candidate.distance <= max_l2_dist) {
+      // Found a semantic match
+      matched_obj_id = candidate.object_id;
+      dedup_hit_final = true;
+      EmitCounter(opt_, "prestige.semantic.hit_total", 1);
+      break;
+    }
+  }
+
+  if (!dedup_hit_final) {
+    EmitCounter(opt_, "prestige.semantic.miss_total", 1);
+  }
+
+  for (int attempt = 0; attempt < opt_.max_retries; ++attempt) {
+    attempts_used = attempt + 1;
+
+    std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+    if (!txn) return finish(rocksdb::Status::IOError("BeginTransaction returned null"));
+
+    // Lock user_key mapping (detect overwrite)
+    std::string old_obj_id;
+    bool had_old = false;
+    {
+      rocksdb::Status s = txn->GetForUpdate(
+          ro, user_kv_cf_,
+          rocksdb::Slice(user_key.data(), user_key.size()),
+          &old_obj_id);
+
+      if (s.ok()) {
+        had_old = true;
+      } else if (!s.IsNotFound()) {
+        if (prestige::internal::IsRetryableTxnStatus(s)) {
+          EmitCounter(opt_, "prestige.put.retry_total", 1);
+          SpanEvent(span, "retry.user_key_lock");
+          continue;
+        }
+        return finish(s);
+      }
+    }
+
+    std::string obj_id;
+
+    if (dedup_hit_final) {
+      // Semantic match found - reuse existing object
+      obj_id = matched_obj_id;
+    } else {
+      // No match - create new object
+      EmitCounter(opt_, "prestige.put.object_created_total", 1);
+
+      auto new_id = prestige::internal::RandomObjectId128();
+      obj_id = prestige::internal::ToBytes(new_id.data(), new_id.size());
+
+      // Store object bytes
+      rocksdb::Status s = txn->Put(
+          objects_cf_, rocksdb::Slice(obj_id),
+          rocksdb::Slice(value_bytes.data(), value_bytes.size()));
+      if (!s.ok()) return finish(s);
+
+      // Store embedding
+      s = txn->Put(embeddings_cf_, rocksdb::Slice(obj_id),
+                   rocksdb::Slice(embedding_bytes));
+      if (!s.ok()) return finish(s);
+
+      // Initialize refcount to 0 (will be incremented below)
+      s = txn->Put(refcount_cf_, rocksdb::Slice(obj_id),
+                   rocksdb::Slice(prestige::internal::EncodeU64LE(0)));
+      if (!s.ok()) return finish(s);
+    }
+
+    had_old_final = had_old;
+
+    // If overwrite maps to same object_id, nothing to do
+    if (had_old && old_obj_id == obj_id) {
+      noop_overwrite = true;
+      EmitCounter(opt_, "prestige.put.noop_overwrite_total", 1);
+      txn->Rollback();
+      return finish(rocksdb::Status::OK());
+    }
+
+    // user_key -> obj_id
+    {
+      rocksdb::Status s = txn->Put(
+          user_kv_cf_,
+          rocksdb::Slice(user_key.data(), user_key.size()),
+          rocksdb::Slice(obj_id));
+      if (!s.ok()) return finish(s);
+    }
+
+    // Incref(new)
+    {
+      uint64_t new_cnt = 0;
+      rocksdb::Status s = AdjustRefcountLocked(txn.get(), refcount_cf_, obj_id, +1, &new_cnt);
+      if (!s.ok()) return finish(s);
+    }
+
+    // Decref(old) and GC if needed
+    if (had_old && old_obj_id != obj_id) {
+      uint64_t old_cnt = 0;
+      rocksdb::Status s = AdjustRefcountLocked(txn.get(), refcount_cf_, old_obj_id, -1, &old_cnt);
+      if (!s.ok()) return finish(s);
+
+      if (opt_.enable_gc && old_cnt == 0) {
+        s = DeleteSemanticObject(txn.get(), old_obj_id);
+        if (!s.ok()) return finish(s);
+
+        EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
+        SpanEvent(span, "gc.delete_object");
+      }
+    }
+
+    const uint64_t commit_start_us = prestige::internal::NowMicros();
+    rocksdb::Status cs = txn->Commit();
+    EmitHistogram(opt_, "prestige.put.commit_us",
+                  prestige::internal::NowMicros() - commit_start_us);
+
+    if (cs.ok()) {
+      // Add to vector index after successful commit (if new object)
+      if (!dedup_hit_final) {
+        if (!vector_index_->Add(embedding, obj_id)) {
+          // Log warning but don't fail - object is stored, just not indexed
+          EmitCounter(opt_, "prestige.semantic.index_add_error_total", 1);
+        }
+
+        // Periodic index save
+        semantic_inserts_since_save_++;
+        if (opt_.semantic_index_save_interval > 0 &&
+            semantic_inserts_since_save_ >= static_cast<uint64_t>(opt_.semantic_index_save_interval)) {
+          if (vector_index_->Save(vector_index_path_)) {
+            semantic_inserts_since_save_ = 0;
+          }
+        }
+      }
+      return finish(cs);
+    }
+
+    if (prestige::internal::IsRetryableTxnStatus(cs)) {
+      EmitCounter(opt_, "prestige.put.retry_total", 1);
+      SpanEvent(span, "retry.commit");
+      continue;
+    }
+
+    return finish(cs);
+  }
+
+  return finish(rocksdb::Status::TimedOut("Put exceeded max_retries"));
+}
+
+#endif  // PRESTIGE_ENABLE_SEMANTIC
 
 }  // namespace prestige

@@ -11,6 +11,8 @@ endif()
 
 option(PRESTIGE_BUILD_TOOLS "Build CLI/tools" ON)
 option(PRESTIGE_BUILD_EXAMPLES "Build examples" ON)
+option(PRESTIGE_ENABLE_SEMANTIC "Enable semantic deduplication (requires ONNX Runtime)" OFF)
+option(PRESTIGE_USE_FAISS "Enable FAISS backend for semantic dedup (requires FAISS)" OFF)
 
 # --- Find RocksDB ---
 # This is intentionally simple. In production, you might prefer pkg-config or a dedicated FindRocksDB.cmake.
@@ -21,9 +23,57 @@ if(NOT ROCKSDB_INCLUDE_DIR OR NOT ROCKSDB_LIBRARY)
   message(FATAL_ERROR "Could not find RocksDB. Set ROCKSDB_INCLUDE_DIR and ROCKSDB_LIBRARY or install RocksDB dev packages.")
 endif()
 
-add_library(prestige_uvs
-  src/store.cpp
-)
+# --- Semantic dedup dependencies (optional) ---
+if(PRESTIGE_ENABLE_SEMANTIC)
+  # Find ONNX Runtime
+  find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h
+    HINTS
+      /usr/local/include/onnxruntime
+      /opt/homebrew/include/onnxruntime
+      $ENV{ONNXRUNTIME_DIR}/include
+  )
+  find_library(ONNXRUNTIME_LIBRARY onnxruntime
+    HINTS
+      /usr/local/lib
+      /opt/homebrew/lib
+      $ENV{ONNXRUNTIME_DIR}/lib
+  )
+
+  if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
+    message(FATAL_ERROR "PRESTIGE_ENABLE_SEMANTIC is ON but ONNX Runtime not found. "
+                        "Set ONNXRUNTIME_INCLUDE_DIR and ONNXRUNTIME_LIBRARY or install ONNX Runtime.")
+  endif()
+
+  message(STATUS "ONNX Runtime found: ${ONNXRUNTIME_LIBRARY}")
+
+  # Fetch hnswlib (header-only library)
+  include(FetchContent)
+  FetchContent_Declare(hnswlib
+    GIT_REPOSITORY https://github.com/nmslib/hnswlib.git
+    GIT_TAG v0.8.0
+  )
+  FetchContent_MakeAvailable(hnswlib)
+
+  message(STATUS "hnswlib fetched: ${hnswlib_SOURCE_DIR}")
+
+  # Optional FAISS support
+  if(PRESTIGE_USE_FAISS)
+    find_package(faiss REQUIRED)
+    message(STATUS "FAISS found")
+  endif()
+endif()
+
+# --- Library sources ---
+set(PRESTIGE_SOURCES src/store.cpp)
+
+if(PRESTIGE_ENABLE_SEMANTIC)
+  list(APPEND PRESTIGE_SOURCES
+    src/embedder.cpp
+    src/vector_index.cpp
+  )
+endif()
+
+add_library(prestige_uvs ${PRESTIGE_SOURCES})
 
 target_include_directories(prestige_uvs
   PUBLIC
@@ -37,6 +87,30 @@ target_link_libraries(prestige_uvs
     pthread
 )
 
+# Semantic dedup includes and libraries
+if(PRESTIGE_ENABLE_SEMANTIC)
+  target_include_directories(prestige_uvs
+    PUBLIC
+      ${ONNXRUNTIME_INCLUDE_DIR}
+      ${hnswlib_SOURCE_DIR}
+  )
+
+  target_link_libraries(prestige_uvs
+    PUBLIC
+      ${ONNXRUNTIME_LIBRARY}
+  )
+
+  target_compile_definitions(prestige_uvs
+    PUBLIC
+      PRESTIGE_ENABLE_SEMANTIC=1
+  )
+
+  if(PRESTIGE_USE_FAISS)
+    target_link_libraries(prestige_uvs PUBLIC faiss)
+    target_compile_definitions(prestige_uvs PUBLIC PRESTIGE_USE_FAISS=1)
+  endif()
+endif()
+
 # Some distros require these explicitly; harmless elsewhere.
 find_library(DL_LIBRARY dl)
 if(DL_LIBRARY)
@@ -47,7 +121,13 @@ if(PRESTIGE_BUILD_EXAMPLES)
   add_executable(prestige_example_basic examples/basic.cpp)
   target_link_libraries(prestige_example_basic PRIVATE prestige_uvs)
   add_executable(prestige_example_observability examples/observability.cpp)
-  target_link_libraries(prestige_example_observability PRIVATE prestige_uvs)  
+  target_link_libraries(prestige_example_observability PRIVATE prestige_uvs)
+
+  # Semantic example only when semantic dedup is enabled
+  if(PRESTIGE_ENABLE_SEMANTIC)
+    add_executable(prestige_example_semantic examples/semantic.cpp)
+    target_link_libraries(prestige_example_semantic PRIVATE prestige_uvs)
+  endif()
 endif()
 
 if(PRESTIGE_BUILD_TOOLS)

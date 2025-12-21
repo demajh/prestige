@@ -41,7 +41,31 @@ struct Tracer {
   virtual ~Tracer() = default;
   virtual std::unique_ptr<TraceSpan> StartSpan(std::string_view name) = 0;
 };
-  
+
+// Forward declarations for semantic dedup
+namespace internal {
+class Embedder;
+class VectorIndex;
+}  // namespace internal
+
+/** Deduplication mode: either exact (SHA-256) or semantic (embeddings). */
+enum class DedupMode {
+  kExact,     // SHA-256 content hash (default, current behavior)
+  kSemantic   // Embedding similarity via vector index
+};
+
+/** Supported embedding models for semantic dedup. */
+enum class SemanticModel {
+  kMiniLM,    // all-MiniLM-L6-v2 (384 dimensions)
+  kBGESmall   // BGE-small-en-v1.5 (384 dimensions)
+};
+
+/** Vector index backend for semantic similarity search. */
+enum class SemanticIndexType {
+  kHNSW,      // hnswlib - graph-based, excellent recall, recommended
+  kFAISS     // FAISS IVF+PQ - for large scale / memory constrained
+};
+
 /**
  * Options for the prestige unique value store.
  *
@@ -67,7 +91,47 @@ struct Options {
   // and attach attributes/events to spans.
   std::shared_ptr<MetricsSink> metrics;
   std::shared_ptr<Tracer> tracer;
-  
+
+  // ---------------------------------------------------------------------------
+  // Semantic deduplication settings (only used when dedup_mode == kSemantic)
+  // ---------------------------------------------------------------------------
+
+  // Deduplication mode: kExact (SHA-256, default) or kSemantic (embeddings)
+  DedupMode dedup_mode = DedupMode::kExact;
+
+  // Path to ONNX model file (REQUIRED for semantic mode)
+  std::string semantic_model_path;
+
+  // Which embedding model architecture the ONNX file contains
+  SemanticModel semantic_model_type = SemanticModel::kMiniLM;
+
+  // Cosine similarity threshold for dedup [0.0, 1.0] (REQUIRED for semantic mode)
+  // Values >= this threshold are considered duplicates.
+  // Set to -1.0 by default to force user to explicitly set it.
+  float semantic_threshold = -1.0f;
+
+  // Maximum text bytes to embed (longer texts are truncated)
+  size_t semantic_max_text_bytes = 8192;
+
+  // Vector index backend
+  SemanticIndexType semantic_index_type = SemanticIndexType::kHNSW;
+
+  // Number of nearest neighbors to retrieve during search
+  int semantic_search_k = 10;
+
+  // Auto-save vector index every N inserts (0 = disabled, save only on Close)
+  int semantic_index_save_interval = 1000;
+
+  // HNSW-specific parameters (when semantic_index_type == kHNSW)
+  int hnsw_m = 16;                // Max connections per node
+  int hnsw_ef_construction = 200; // Build-time search depth
+  int hnsw_ef_search = 50;        // Query-time search depth
+
+  // FAISS-specific parameters (when semantic_index_type == kFAISS)
+  int faiss_nlist = 100;          // Number of IVF clusters
+  int faiss_nprobe = 10;          // Clusters to search at query time
+  int faiss_pq_m = 48;            // PQ sub-quantizers (must divide 384)
+  int faiss_pq_nbits = 8;         // Bits per sub-quantizer
 };
 
 /**
@@ -127,6 +191,15 @@ class Store {
   rocksdb::Status PutImpl(std::string_view user_key, std::string_view value_bytes);
   rocksdb::Status DeleteImpl(std::string_view user_key);
 
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  rocksdb::Status PutImplSemantic(std::string_view user_key,
+                                   std::string_view value_bytes,
+                                   TraceSpan* span,
+                                   uint64_t op_start_us);
+  rocksdb::Status DeleteSemanticObject(rocksdb::Transaction* txn,
+                                        const std::string& obj_id);
+#endif
+
   Options opt_;
 
   rocksdb::TransactionDB* db_ = nullptr;
@@ -137,6 +210,13 @@ class Store {
   rocksdb::ColumnFamilyHandle* dedup_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* refcount_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* meta_cf_ = nullptr;
+
+  // Semantic dedup members (only used when dedup_mode == kSemantic)
+  rocksdb::ColumnFamilyHandle* embeddings_cf_ = nullptr;
+  std::unique_ptr<internal::Embedder> embedder_;
+  std::unique_ptr<internal::VectorIndex> vector_index_;
+  std::string vector_index_path_;  // Path to vector index file
+  uint64_t semantic_inserts_since_save_ = 0;  // For periodic index saves
 };
 
 }  // namespace prestige

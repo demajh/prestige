@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <random>
@@ -8,6 +9,7 @@
 #include <string_view>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 #include <rocksdb/status.h>
 
@@ -198,6 +200,60 @@ inline std::array<uint8_t, 16> RandomObjectId128() {
 
 inline bool IsRetryableTxnStatus(const rocksdb::Status& s) {
   return s.IsBusy() || s.IsTimedOut() || s.IsTryAgain() || s.IsAborted();
+}
+
+// ---------------------------------------------------------------------------
+// Embedding utilities for semantic dedup
+// ---------------------------------------------------------------------------
+
+// Embedding dimensions for supported models
+constexpr size_t kMiniLMDimensions = 384;
+constexpr size_t kBGESmallDimensions = 384;
+constexpr size_t kDefaultEmbeddingDimensions = 384;
+
+// Serialize embedding vector to bytes (little-endian floats)
+inline std::string SerializeEmbedding(const std::vector<float>& embedding) {
+  std::string out;
+  out.resize(embedding.size() * sizeof(float));
+  std::memcpy(out.data(), embedding.data(), out.size());
+  return out;
+}
+
+// Deserialize bytes to embedding vector
+inline bool DeserializeEmbedding(std::string_view bytes, std::vector<float>* out) {
+  if (bytes.size() % sizeof(float) != 0) return false;
+  size_t count = bytes.size() / sizeof(float);
+  out->resize(count);
+  std::memcpy(out->data(), bytes.data(), bytes.size());
+  return true;
+}
+
+// Compute cosine similarity between two embeddings
+// Returns value in [-1.0, 1.0]; 1.0 means identical directions
+inline float CosineSimilarity(const std::vector<float>& a, const std::vector<float>& b) {
+  if (a.size() != b.size() || a.empty()) return 0.0f;
+
+  float dot = 0.0f, norm_a = 0.0f, norm_b = 0.0f;
+  for (size_t i = 0; i < a.size(); ++i) {
+    dot += a[i] * b[i];
+    norm_a += a[i] * a[i];
+    norm_b += b[i] * b[i];
+  }
+
+  float denom = std::sqrt(norm_a) * std::sqrt(norm_b);
+  if (denom < 1e-12f) return 0.0f;
+  return dot / denom;
+}
+
+// Convert cosine similarity to L2 distance (for normalized vectors)
+// L2^2 = 2 - 2*cos(similarity) for unit vectors
+inline float CosineToL2Distance(float cosine_sim) {
+  return std::sqrt(2.0f - 2.0f * cosine_sim);
+}
+
+// Convert L2 distance to cosine similarity (for normalized vectors)
+inline float L2DistanceToCosine(float l2_dist) {
+  return 1.0f - (l2_dist * l2_dist) / 2.0f;
 }
 
 }  // namespace prestige::internal
