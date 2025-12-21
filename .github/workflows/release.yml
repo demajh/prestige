@@ -1,0 +1,269 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Prestige v${{ steps.get_version.outputs.version }}
+          body: |
+            ## Prestige v${{ steps.get_version.outputs.version }}
+
+            ### Installation
+
+            **Ubuntu/Debian (apt-get):**
+            ```bash
+            # Add the repository
+            curl -fsSL https://demajh.github.io/prestige/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/prestige-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/prestige-archive-keyring.gpg] https://demajh.github.io/prestige stable main" | sudo tee /etc/apt/sources.list.d/prestige.list
+            sudo apt-get update
+            sudo apt-get install prestige
+            ```
+
+            **Or install .deb directly:**
+            ```bash
+            curl -LO https://github.com/demajh/prestige/releases/download/v${{ steps.get_version.outputs.version }}/prestige_${{ steps.get_version.outputs.version }}-1_amd64.deb
+            sudo dpkg -i prestige_${{ steps.get_version.outputs.version }}-1_amd64.deb
+            sudo apt-get install -f  # Install dependencies
+            ```
+
+            **macOS (Homebrew):**
+            ```bash
+            brew tap demajh/prestige
+            brew install prestige
+            ```
+
+            **From source:**
+            ```bash
+            tar -xzf prestige-${{ steps.get_version.outputs.version }}-source.tar.gz
+            cd prestige-${{ steps.get_version.outputs.version }}
+            mkdir build && cd build
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+            make -j
+            sudo make install
+            ```
+
+            See [README](https://github.com/demajh/prestige#readme) for full documentation.
+          draft: false
+          prerelease: false
+
+  build-linux:
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DPRESTIGE_BUILD_EXAMPLES=OFF
+          cmake --build build -j$(nproc)
+
+      - name: Create tarball
+        run: |
+          DESTDIR=pkg cmake --install build
+          tar -czvf prestige-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz -C pkg .
+
+      - name: Upload Linux binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: prestige-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz
+          asset_name: prestige-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz
+          asset_content_type: application/gzip
+
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install rocksdb
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DPRESTIGE_BUILD_EXAMPLES=OFF
+          cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Create tarball
+        run: |
+          DESTDIR=pkg cmake --install build
+          tar -czvf prestige-${{ needs.create-release.outputs.version }}-macos-arm64.tar.gz -C pkg .
+
+      - name: Upload macOS binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: prestige-${{ needs.create-release.outputs.version }}-macos-arm64.tar.gz
+          asset_name: prestige-${{ needs.create-release.outputs.version }}-macos-arm64.tar.gz
+          asset_content_type: application/gzip
+
+  build-deb:
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y devscripts debhelper cmake librocksdb-dev
+
+      - name: Update changelog version
+        run: |
+          sed -i "s/0.1.0-1/${{ needs.create-release.outputs.version }}-1/g" debian/changelog
+
+      - name: Build .deb package
+        run: |
+          dpkg-buildpackage -us -uc -b
+
+      - name: Upload prestige .deb
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ../prestige_${{ needs.create-release.outputs.version }}-1_amd64.deb
+          asset_name: prestige_${{ needs.create-release.outputs.version }}-1_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
+
+      - name: Upload prestige-dev .deb
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ../prestige-dev_${{ needs.create-release.outputs.version }}-1_amd64.deb
+          asset_name: prestige-dev_${{ needs.create-release.outputs.version }}-1_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
+
+      - name: Upload .deb artifacts for APT repo
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages
+          path: |
+            ../prestige_${{ needs.create-release.outputs.version }}-1_amd64.deb
+            ../prestige-dev_${{ needs.create-release.outputs.version }}-1_amd64.deb
+
+  source-tarball:
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create source tarball
+        run: |
+          mkdir prestige-${{ needs.create-release.outputs.version }}
+          cp -r include src examples tools cmake debian CMakeLists.txt README.md LICENSE prestige-${{ needs.create-release.outputs.version }}/
+          tar -czvf prestige-${{ needs.create-release.outputs.version }}-source.tar.gz prestige-${{ needs.create-release.outputs.version }}
+
+      - name: Upload source tarball
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: prestige-${{ needs.create-release.outputs.version }}-source.tar.gz
+          asset_name: prestige-${{ needs.create-release.outputs.version }}-source.tar.gz
+          asset_content_type: application/gzip
+
+  update-apt-repo:
+    needs: [create-release, build-deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+
+      - name: Download .deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages
+          path: debs/
+
+      - name: Install reprepro
+        run: sudo apt-get update && sudo apt-get install -y reprepro gnupg
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            echo "No GPG key configured, creating unsigned repo"
+          fi
+
+      - name: Setup APT repository structure
+        run: |
+          mkdir -p conf
+          cat > conf/distributions <<EOF
+          Origin: prestige
+          Label: prestige
+          Codename: stable
+          Architectures: amd64
+          Components: main
+          Description: Prestige APT Repository
+          EOF
+
+      - name: Add packages to repository
+        run: |
+          for deb in debs/*.deb; do
+            reprepro -b . includedeb stable "$deb"
+          done
+
+      - name: Commit and push
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Update APT repository for v${{ needs.create-release.outputs.version }}" || true
+          git push

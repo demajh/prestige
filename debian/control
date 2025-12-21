@@ -1,0 +1,29 @@
+Source: prestige
+Section: database
+Priority: optional
+Maintainer: demajh <demajh@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), cmake (>= 3.16), librocksdb-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/demajh/prestige
+Rules-Requires-Root: no
+
+Package: prestige
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, librocksdb6.11 | librocksdb7.8
+Description: Content-deduplicated key-value store
+ Prestige is a RocksDB-backed key-value store with unique-value semantics.
+ It supports both exact deduplication (SHA-256) and semantic deduplication
+ (using neural network embeddings).
+ .
+ Features:
+  - Automatic content deduplication
+  - Reference counting with garbage collection
+  - Transactional updates
+  - Optional semantic similarity matching
+
+Package: prestige-dev
+Architecture: any
+Depends: prestige (= ${binary:Version}), ${misc:Depends}
+Description: Development files for prestige
+ This package contains the header files and CMake/pkg-config files
+ needed to develop applications using the prestige library.

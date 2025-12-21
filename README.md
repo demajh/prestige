@@ -1,5 +1,9 @@
 # prestige unique value store
 
+[![CI](https://github.com/demajh/prestige/actions/workflows/ci.yml/badge.svg)](https://github.com/demajh/prestige/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/demajh/prestige)](https://github.com/demajh/prestige/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 **What is a unique value store?**
 
 A unique value store is a queryable collection of unique values.  In order to maintain the 'unique'-ness of the collection, there must be some mechanism to remove duplicates.
@@ -152,44 +156,127 @@ This is a “RocksDB-like” API: users never see object IDs.
 
 ---
 
-## Build
+## Installation
 
-### Dependencies
+### Quick Install (Ubuntu/Debian with apt-get)
+
+```bash
+# Add the GPG key
+curl -fsSL https://demajh.github.io/prestige/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/prestige-archive-keyring.gpg
+
+# Add the repository
+echo "deb [signed-by=/usr/share/keyrings/prestige-archive-keyring.gpg] https://demajh.github.io/prestige stable main" | sudo tee /etc/apt/sources.list.d/prestige.list
+
+# Install
+sudo apt-get update
+sudo apt-get install prestige
+
+# For development headers
+sudo apt-get install prestige-dev
+```
+
+**Or install .deb directly:**
+
+```bash
+# Download and install (replace VERSION with actual version, e.g., 0.1.0)
+curl -LO https://github.com/demajh/prestige/releases/latest/download/prestige_VERSION-1_amd64.deb
+sudo dpkg -i prestige_VERSION-1_amd64.deb
+sudo apt-get install -f  # Install dependencies if needed
+```
+
+### Quick Install (macOS with Homebrew)
+
+```bash
+# Add the tap and install
+brew tap demajh/prestige
+brew install prestige
+```
+
+### Quick Install (from binary release)
+
+Download the latest release for your platform from the [Releases page](https://github.com/demajh/prestige/releases):
+
+```bash
+# Linux x64
+curl -LO https://github.com/demajh/prestige/releases/latest/download/prestige-VERSION-linux-x64.tar.gz
+sudo tar -xzf prestige-VERSION-linux-x64.tar.gz -C /
+
+# macOS ARM64
+curl -LO https://github.com/demajh/prestige/releases/latest/download/prestige-VERSION-macos-arm64.tar.gz
+sudo tar -xzf prestige-VERSION-macos-arm64.tar.gz -C /
+```
+
+### Build from Source
+
+#### Dependencies
 
 **Required:**
-- A RocksDB build that includes **TransactionDB** support (`rocksdb/utilities/transaction_db.h`).
+- CMake 3.16+
+- C++17 compiler (GCC 8+, Clang 7+, or MSVC 2019+)
+- RocksDB with TransactionDB support
 
 **Optional (for semantic mode):**
 - ONNX Runtime (C++ API)
 - hnswlib (fetched automatically via CMake)
 
-### Build with CMake
-
-**Basic build (exact mode only):**
+#### Install dependencies
 
 ```bash
-mkdir -p build
-cmake -S . -B build
-cmake --build build -j
+# Ubuntu/Debian
+sudo apt-get install librocksdb-dev
+
+# macOS
+brew install rocksdb
+
+# For semantic mode (Ubuntu)
+wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
+tar -xzf onnxruntime-linux-x64-1.16.3.tgz
+sudo cp -r onnxruntime-linux-x64-1.16.3/include/* /usr/local/include/
+sudo cp -r onnxruntime-linux-x64-1.16.3/lib/* /usr/local/lib/
+sudo ldconfig
 ```
 
-**With semantic deduplication:**
+#### Build and install
 
 ```bash
-mkdir -p build
-cmake -S . -B build -DPRESTIGE_ENABLE_SEMANTIC=ON
-cmake --build build -j
+git clone https://github.com/demajh/prestige.git
+cd prestige
+mkdir build && cd build
+
+# Basic build (exact dedup only)
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+sudo make install
+
+# With semantic dedup
+cmake .. -DCMAKE_BUILD_TYPE=Release -DPRESTIGE_ENABLE_SEMANTIC=ON
+make -j$(nproc)
+sudo make install
 ```
 
-Outputs:
-- `prestige_uvs` (library)
+#### Build outputs
+
+- `libprestige_uvs.a` / `libprestige_uvs.so` (library)
+- `prestige_cli` (CLI tool)
 - `prestige_example_basic` (example program)
 - `prestige_example_semantic` (semantic example, if enabled)
-- `prestige_cli` (CLI)
 
-### Obtaining an ONNX Model
+### Using prestige in your CMake project
 
-For semantic mode, you need an ONNX-exported sentence transformer model:
+After installation, use `find_package`:
+
+```cmake
+find_package(prestige_uvs REQUIRED)
+target_link_libraries(your_target PRIVATE prestige::prestige_uvs)
+```
+
+Or with pkg-config:
+
+```bash
+g++ -std=c++17 my_app.cpp $(pkg-config --cflags --libs prestige_uvs) -o my_app
+```
+
+### Obtaining an ONNX Model (for semantic mode)
 
 ```bash
 pip install optimum[onnxruntime]

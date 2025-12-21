@@ -1,0 +1,20 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find required dependencies
+find_dependency(Threads REQUIRED)
+
+# RocksDB is required
+find_path(ROCKSDB_INCLUDE_DIR rocksdb/db.h)
+find_library(ROCKSDB_LIBRARY rocksdb)
+
+if(NOT ROCKSDB_INCLUDE_DIR OR NOT ROCKSDB_LIBRARY)
+  set(prestige_uvs_FOUND FALSE)
+  set(prestige_uvs_NOT_FOUND_MESSAGE "RocksDB not found")
+  return()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/prestige_uvsTargets.cmake")
+
+check_required_components(prestige_uvs)

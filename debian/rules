@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DPRESTIGE_BUILD_EXAMPLES=OFF \
+		-DPRESTIGE_BUILD_TOOLS=ON
+
+override_dh_auto_install:
+	dh_auto_install
+	# Remove examples from install
+	rm -rf debian/tmp/usr/bin/prestige_example_*

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Release, Debug]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install rocksdb
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DPRESTIGE_BUILD_EXAMPLES=ON \
+            -DPRESTIGE_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run basic example
+        run: |
+          ./build/prestige_example_basic
+          rm -rf ./prestige_db
+
+  build-semantic:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev
+
+          # Install ONNX Runtime
+          wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
+          tar -xzf onnxruntime-linux-x64-1.16.3.tgz
+          sudo cp -r onnxruntime-linux-x64-1.16.3/include/* /usr/local/include/
+          sudo cp -r onnxruntime-linux-x64-1.16.3/lib/* /usr/local/lib/
+          sudo ldconfig
+
+      - name: Configure CMake with semantic dedup
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPRESTIGE_ENABLE_SEMANTIC=ON \
+            -DPRESTIGE_BUILD_EXAMPLES=ON \
+            -DPRESTIGE_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config Release -j$(nproc)

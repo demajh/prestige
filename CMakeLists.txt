@@ -1,8 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
-project(prestige_uvs LANGUAGES CXX)
+project(prestige_uvs
+  VERSION 0.1.0
+  DESCRIPTION "Content-deduplicated key-value store with exact and semantic dedup"
+  HOMEPAGE_URL "https://github.com/demajh/prestige"
+  LANGUAGES CXX
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Generate position-independent code for shared library builds
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Suppress C++20 extension warnings from RocksDB headers
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
@@ -134,3 +142,72 @@ if(PRESTIGE_BUILD_TOOLS)
   add_executable(prestige_cli tools/prestige_cli.cpp)
   target_link_libraries(prestige_cli PRIVATE prestige_uvs)
 endif()
+
+# --- Installation ---
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+# Set library properties
+set_target_properties(prestige_uvs PROPERTIES
+  VERSION ${PROJECT_VERSION}
+  SOVERSION ${PROJECT_VERSION_MAJOR}
+  PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/store.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/internal.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/version.hpp"
+)
+
+# Install library
+install(TARGETS prestige_uvs
+  EXPORT prestige_uvsTargets
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/prestige
+)
+
+# Install additional headers
+install(DIRECTORY include/prestige
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  FILES_MATCHING PATTERN "*.hpp"
+)
+
+# Install CLI tool
+if(PRESTIGE_BUILD_TOOLS)
+  install(TARGETS prestige_cli
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  )
+endif()
+
+# Generate and install CMake package config
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvsConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/prestige_uvsConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvsConfig.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/prestige_uvs
+)
+
+install(EXPORT prestige_uvsTargets
+  FILE prestige_uvsTargets.cmake
+  NAMESPACE prestige::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/prestige_uvs
+)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvsConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvsConfigVersion.cmake"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/prestige_uvs
+)
+
+# Generate pkg-config file
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/prestige_uvs.pc.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvs.pc"
+  @ONLY
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvs.pc"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
