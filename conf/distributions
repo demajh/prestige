@@ -1,0 +1,6 @@
+Origin: prestige
+Label: prestige
+Codename: stable
+Architectures: amd64
+Components: main
+Description: Prestige APT Repository

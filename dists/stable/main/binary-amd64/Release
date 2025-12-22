@@ -1,0 +1,5 @@
+Component: main
+Origin: prestige
+Label: prestige
+Architecture: amd64
+Description: Prestige APT Repository

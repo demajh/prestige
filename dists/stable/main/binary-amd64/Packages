@@ -1,0 +1,44 @@
+Package: prestige
+Version: 0.1.0
+Architecture: amd64
+Maintainer: demajh <demajh@users.noreply.github.com>
+Installed-Size: 212
+Depends: libc6 (>= 2.38), libgcc-s1 (>= 3.3.1), librocksdb8.9 (>= 8.9.1), libstdc++6 (>= 13.1)
+Homepage: https://github.com/demajh/prestige
+Priority: optional
+Section: database
+Filename: pool/main/p/prestige/prestige_0.1.0_amd64.deb
+Size: 54330
+SHA256: 5bc1730227f4417d13e7f3936f34b1200635eb4e83199fa562cfa3cc443b6143
+SHA1: ee1233ff448856b8e511622788ec9b9f1035cd52
+MD5sum: 2915f4f731adc86b4a5279f7266c6a55
+Description: Content-deduplicated key-value store
+ Prestige is a RocksDB-backed key-value store with unique-value semantics.
+ It supports both exact deduplication (SHA-256) and semantic deduplication
+ (using neural network embeddings).
+ .
+ Features:
+  - Automatic content deduplication
+  - Reference counting with garbage collection
+  - Transactional updates
+  - Optional semantic similarity matching
+
+Package: prestige-dev
+Source: prestige
+Version: 0.1.0
+Architecture: amd64
+Maintainer: demajh <demajh@users.noreply.github.com>
+Installed-Size: 53
+Depends: prestige (= 0.1.0)
+Homepage: https://github.com/demajh/prestige
+Priority: optional
+Section: database
+Filename: pool/main/p/prestige/prestige-dev_0.1.0_amd64.deb
+Size: 12232
+SHA256: 406bd5774c8cd53b537d9f7ac31db10d5c8234521edfd81376b3ddd408a9ae92
+SHA1: 0b9de6bac4520c582780aa00ae72ef029b98ab88
+MD5sum: 08788ed3c99a516ff7242cf88f3ce629
+Description: Development files for prestige
+ This package contains the header files and CMake/pkg-config files
+ needed to develop applications using the prestige library.
+

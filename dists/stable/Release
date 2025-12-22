@@ -1,0 +1,19 @@
+Origin: prestige
+Label: prestige
+Codename: stable
+Date: Mon, 22 Dec 2025 02:22:26 UTC
+Architectures: amd64
+Components: main
+Description: Prestige APT Repository
+MD5Sum:
+ 09285d59b52c3508fcd10868ca9f6f3a 1595 main/binary-amd64/Packages
+ 145b2d44f592d5092d3f91c9454e40d0 822 main/binary-amd64/Packages.gz
+ f0e87dcc03941608ba2acdc87573f522 106 main/binary-amd64/Release
+SHA1:
+ 9306d5de010122e70b8716f6ef79307602c011b1 1595 main/binary-amd64/Packages
+ 6c2117441208017e204f2aaafe5040b8af8068ef 822 main/binary-amd64/Packages.gz
+ 7a7cddd213353be2ea105e7bc0a0438f56db1f53 106 main/binary-amd64/Release
+SHA256:
+ f11ba8c604d4e5c20ede2c28d17c7460702e28e5e1725a9305bd8b781c33aa82 1595 main/binary-amd64/Packages
+ 85496a5d1448aa7b66da63f02133d425a44ce16fdbc2dd452b3840e7fbf46364 822 main/binary-amd64/Packages.gz
+ a9e2de9c07a9c4693e0a807739e4b17434d13b69166123e59766439de8e6ab4a 106 main/binary-amd64/Release
