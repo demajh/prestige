@@ -157,7 +157,7 @@ jobs:
 
       - name: Build .deb package
         run: |
-          dpkg-buildpackage -us -uc -b || (echo "=== Contents of debian/tmp ===" && find debian/tmp -type f 2>/dev/null | head -50 && exit 1)
+          dpkg-buildpackage -us -uc -b
 
       - name: Upload prestige .deb
         uses: actions/upload-release-asset@v1

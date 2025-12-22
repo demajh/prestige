@@ -1,2 +1,2 @@
-usr/lib/*/libprestige_uvs.so*
+usr/lib/*/libprestige_uvs.a
 usr/bin/prestige_cli
