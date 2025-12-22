@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: prestige
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, librocksdb6.11 | librocksdb7.8
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Content-deduplicated key-value store
  Prestige is a RocksDB-backed key-value store with unique-value semantics.
  It supports both exact deduplication (SHA-256) and semantic deduplication
