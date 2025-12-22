@@ -2,7 +2,7 @@ class Prestige < Formula
   desc "Content-deduplicated key-value store with exact and semantic dedup"
   homepage "https://github.com/demajh/prestige"
   url "https://github.com/demajh/prestige/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_ACTUAL_SHA256"
+  sha256 "cc080731a540b21c93efddc69d1ef725e93efadccdefb5785bd1585c4bc49b73"
   license "Apache-2.0"
   head "https://github.com/demajh/prestige.git", branch: "main"
 
