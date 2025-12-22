@@ -149,7 +149,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y devscripts debhelper cmake librocksdb-dev
+          sudo apt-get install -y build-essential devscripts debhelper cmake librocksdb-dev
 
       - name: Update changelog version
         run: |
