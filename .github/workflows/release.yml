@@ -158,6 +158,7 @@ jobs:
       - name: Build .deb package
         run: |
           dpkg-buildpackage -us -uc -b
+          cp ../prestige_*.deb ../prestige-dev_*.deb .
 
       - name: Upload prestige .deb
         uses: actions/upload-release-asset@v1
@@ -165,7 +166,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ../prestige_${{ needs.create-release.outputs.version }}_amd64.deb
+          asset_path: prestige_${{ needs.create-release.outputs.version }}_amd64.deb
           asset_name: prestige_${{ needs.create-release.outputs.version }}_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
@@ -175,7 +176,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ../prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
+          asset_path: prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
           asset_name: prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
@@ -184,8 +185,8 @@ jobs:
         with:
           name: deb-packages
           path: |
-            ../prestige_${{ needs.create-release.outputs.version }}_amd64.deb
-            ../prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
+            prestige_${{ needs.create-release.outputs.version }}_amd64.deb
+            prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
 
   source-tarball:
     needs: create-release
