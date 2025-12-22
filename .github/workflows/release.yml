@@ -46,8 +46,8 @@ jobs:
 
             **Or install .deb directly:**
             ```bash
-            curl -LO https://github.com/demajh/prestige/releases/download/v${{ steps.get_version.outputs.version }}/prestige_${{ steps.get_version.outputs.version }}-1_amd64.deb
-            sudo dpkg -i prestige_${{ steps.get_version.outputs.version }}-1_amd64.deb
+            curl -LO https://github.com/demajh/prestige/releases/download/v${{ steps.get_version.outputs.version }}/prestige_${{ steps.get_version.outputs.version }}_amd64.deb
+            sudo dpkg -i prestige_${{ steps.get_version.outputs.version }}_amd64.deb
             sudo apt-get install -f  # Install dependencies
             ```
 
@@ -153,7 +153,7 @@ jobs:
 
       - name: Update changelog version
         run: |
-          sed -i "s/0.1.0-1/${{ needs.create-release.outputs.version }}-1/g" debian/changelog
+          sed -i "s/0.1.0/${{ needs.create-release.outputs.version }}/g" debian/changelog
 
       - name: Build .deb package
         run: |
@@ -165,8 +165,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ../prestige_${{ needs.create-release.outputs.version }}-1_amd64.deb
-          asset_name: prestige_${{ needs.create-release.outputs.version }}-1_amd64.deb
+          asset_path: ../prestige_${{ needs.create-release.outputs.version }}_amd64.deb
+          asset_name: prestige_${{ needs.create-release.outputs.version }}_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload prestige-dev .deb
@@ -175,8 +175,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ../prestige-dev_${{ needs.create-release.outputs.version }}-1_amd64.deb
-          asset_name: prestige-dev_${{ needs.create-release.outputs.version }}-1_amd64.deb
+          asset_path: ../prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
+          asset_name: prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload .deb artifacts for APT repo
@@ -184,8 +184,8 @@ jobs:
         with:
           name: deb-packages
           path: |
-            ../prestige_${{ needs.create-release.outputs.version }}-1_amd64.deb
-            ../prestige-dev_${{ needs.create-release.outputs.version }}-1_amd64.deb
+            ../prestige_${{ needs.create-release.outputs.version }}_amd64.deb
+            ../prestige-dev_${{ needs.create-release.outputs.version }}_amd64.deb
 
   source-tarball:
     needs: create-release
