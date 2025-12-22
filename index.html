@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Prestige APT Repository</title>
+</head>
+<body>
+  <h1>Prestige APT Repository</h1>
+  <p>This is the APT repository for <a href="https://github.com/demajh/prestige">Prestige</a>.</p>
+  <h2>Installation</h2>
+  <pre>
+curl -fsSL https://demajh.github.io/prestige/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/prestige-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/prestige-archive-keyring.gpg] https://demajh.github.io/prestige stable main" | sudo tee /etc/apt/sources.list.d/prestige.list
+sudo apt-get update
+sudo apt-get install prestige
+  </pre>
+</body>
+</html>
