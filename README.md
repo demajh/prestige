@@ -480,14 +480,17 @@ Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
 
 ## Roadmap / TODO
 
-If you want to take this beyond a prototype, the next steps tend to be:
+- End-to-end RAG examples + benchmark harness
+- Cache-centric observability: metrics for hit/miss, fill rate, inflight waits, batch sizes, and (optionally) embedder latency.
+- Public embedding-cache functions: `GetEmbedding*`, `PutEmbedding*`, and metadata access (dims/dtype/model fingerprint), ideally via an `EmbeddingCache` wrapper atop the generic store.
+- Cache semantics: TTL and/or size-based eviction, plus tooling to sweep/prune and report cache size/health.
+- Python bindings & integrations: a pip-installable package (wheels), plus LangChain/LlamaIndex adapters and minimal “drop-in cached embeddings” examples.
+- Canonical text normalization (safe defaults, configurable) so cache keys stay stable across harmless formatting differences.
+- Concurrency: “inflight” reservation/lease support so multiple workers don’t double-embed the same missing chunk.
+- Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (and batch variants for dedup-key operations) to amortize transaction cost and match embedding-provider batching.
+- Model/version-aware cache keys + binary embedding format + metadata (dims/dtype/etc.), and a configurable “bring your own embedder” interface so users can plug in OpenAI/Cohere/local/ONNX/etc.
+- Explicit dedup-key operations (pre-embed lookup): e.g., `GetByDedupKey`, `PutByDedupKey`, and (optionally) `Link(alias_key → dedup_key)` so you dedup *before* computing embeddings.
 
-- Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (amortize transaction cost).
-- Chunk-level dedup (content-defined chunking) for large blobs.
-- Optional value canonicalization before hashing (exact mode).
-- Background GC / tombstone handling modes (instead of immediate delete).
-- FAISS backend for semantic mode (IVF+PQ for larger scale).
-- Hybrid mode: exact dedup with semantic fallback.
 
 ---
 
