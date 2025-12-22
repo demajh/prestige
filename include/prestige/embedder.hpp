@@ -26,6 +26,7 @@ class Embedder {
   virtual ~Embedder() = default;
 
   // Factory: load model from ONNX file
+  // Vocabulary file (vocab.txt) is auto-detected in the same directory as the model.
   // Returns nullptr on failure, sets error_out if provided
   static std::unique_ptr<Embedder> Create(
       const std::string& model_path,

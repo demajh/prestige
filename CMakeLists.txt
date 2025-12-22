@@ -12,6 +12,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Generate position-independent code for shared library builds
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Include GNUInstallDirs early for CMAKE_INSTALL_INCLUDEDIR
+include(GNUInstallDirs)
+
 # Suppress C++20 extension warnings from RocksDB headers
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
   add_compile_options(-Wno-c++20-extensions)
@@ -77,6 +80,7 @@ set(PRESTIGE_SOURCES src/store.cpp)
 if(PRESTIGE_ENABLE_SEMANTIC)
   list(APPEND PRESTIGE_SOURCES
     src/embedder.cpp
+    src/tokenizer.cpp
     src/vector_index.cpp
   )
 endif()
@@ -85,7 +89,8 @@ add_library(prestige_uvs ${PRESTIGE_SOURCES})
 
 target_include_directories(prestige_uvs
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     ${ROCKSDB_INCLUDE_DIR}
 )
 
@@ -100,7 +105,7 @@ if(PRESTIGE_ENABLE_SEMANTIC)
   target_include_directories(prestige_uvs
     PUBLIC
       ${ONNXRUNTIME_INCLUDE_DIR}
-      ${hnswlib_SOURCE_DIR}
+      $<BUILD_INTERFACE:${hnswlib_SOURCE_DIR}>
   )
 
   target_link_libraries(prestige_uvs
@@ -144,7 +149,6 @@ if(PRESTIGE_BUILD_TOOLS)
 endif()
 
 # --- Installation ---
-include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 # Set library properties

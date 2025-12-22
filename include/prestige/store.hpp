@@ -42,11 +42,13 @@ struct Tracer {
   virtual std::unique_ptr<TraceSpan> StartSpan(std::string_view name) = 0;
 };
 
+#ifdef PRESTIGE_ENABLE_SEMANTIC
 // Forward declarations for semantic dedup
 namespace internal {
 class Embedder;
 class VectorIndex;
 }  // namespace internal
+#endif
 
 /** Deduplication mode: either exact (SHA-256) or semantic (embeddings). */
 enum class DedupMode {
@@ -100,6 +102,7 @@ struct Options {
   DedupMode dedup_mode = DedupMode::kExact;
 
   // Path to ONNX model file (REQUIRED for semantic mode)
+  // The vocabulary file (vocab.txt) is expected to be in the same directory.
   std::string semantic_model_path;
 
   // Which embedding model architecture the ONNX file contains
@@ -211,12 +214,14 @@ class Store {
   rocksdb::ColumnFamilyHandle* refcount_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* meta_cf_ = nullptr;
 
+#ifdef PRESTIGE_ENABLE_SEMANTIC
   // Semantic dedup members (only used when dedup_mode == kSemantic)
   rocksdb::ColumnFamilyHandle* embeddings_cf_ = nullptr;
   std::unique_ptr<internal::Embedder> embedder_;
   std::unique_ptr<internal::VectorIndex> vector_index_;
   std::string vector_index_path_;  // Path to vector index file
   uint64_t semantic_inserts_since_save_ = 0;  // For periodic index saves
+#endif
 };
 
 }  // namespace prestige

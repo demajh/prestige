@@ -3,10 +3,10 @@
 // This example demonstrates semantic dedup using embeddings.
 // Build with: cmake -DPRESTIGE_ENABLE_SEMANTIC=ON ..
 //
-// Before running, download an ONNX model:
-//   pip install optimum[onnxruntime]
-//   optimum-cli export onnx --model sentence-transformers/all-MiniLM-L6-v2 \
-//       --task feature-extraction ./minilm_onnx/
+// Before running, download an ONNX model and vocab to the same directory:
+//   mkdir -p models && cd models
+//   curl -LO https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model.onnx
+//   curl -LO https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/vocab.txt
 
 #include <prestige/store.hpp>
 
@@ -15,9 +15,10 @@
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <path-to-onnx-model>\n";
+    std::cerr << "Usage: " << argv[0] << " <model.onnx>\n";
+    std::cerr << "\nThe vocab.txt file should be in the same directory as the model.\n";
     std::cerr << "\nExample:\n";
-    std::cerr << "  " << argv[0] << " ./minilm_onnx/model.onnx\n";
+    std::cerr << "  " << argv[0] << " ./models/model.onnx\n";
     return 1;
   }
 
@@ -28,7 +29,7 @@ int main(int argc, char** argv) {
   // Configure semantic deduplication
   opt.dedup_mode = prestige::DedupMode::kSemantic;
   opt.semantic_model_path = model_path;
-  opt.semantic_model_type = prestige::SemanticModel::kMiniLM;
+  opt.semantic_model_type = prestige::SemanticModel::kBGESmall;
   opt.semantic_threshold = 0.85f;  // Cosine similarity threshold for dedup
   opt.semantic_search_k = 10;      // Number of candidates to check
 
@@ -54,6 +55,13 @@ int main(int argc, char** argv) {
   // This text is semantically different
   const char* text4 = "Machine learning is a subset of artificial intelligence.";
 
+  auto print_counts = [&db]() {
+    uint64_t keys = 0, unique = 0;
+    db->CountKeys(&keys);
+    db->CountUniqueValues(&unique);
+    std::cout << "    -> keys=" << keys << ", unique=" << unique << "\n";
+  };
+
   std::cout << "Inserting semantically similar texts:\n";
   std::cout << "  key1: \"" << text1 << "\"\n";
   s = db->Put("key1", text1);
@@ -61,6 +69,7 @@ int main(int argc, char** argv) {
     std::cerr << "Put key1 failed: " << s.ToString() << "\n";
     return 1;
   }
+  print_counts();
 
   std::cout << "  key2: \"" << text2 << "\"\n";
   s = db->Put("key2", text2);
@@ -68,6 +77,7 @@ int main(int argc, char** argv) {
     std::cerr << "Put key2 failed: " << s.ToString() << "\n";
     return 1;
   }
+  print_counts();
 
   std::cout << "  key3: \"" << text3 << "\"\n";
   s = db->Put("key3", text3);
@@ -75,6 +85,7 @@ int main(int argc, char** argv) {
     std::cerr << "Put key3 failed: " << s.ToString() << "\n";
     return 1;
   }
+  print_counts();
 
   std::cout << "\nInserting semantically different text:\n";
   std::cout << "  key4: \"" << text4 << "\"\n";
@@ -83,6 +94,7 @@ int main(int argc, char** argv) {
     std::cerr << "Put key4 failed: " << s.ToString() << "\n";
     return 1;
   }
+  print_counts();
 
   // Count keys and unique values
   uint64_t key_count = 0;

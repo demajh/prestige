@@ -2,10 +2,13 @@
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 
+#include <prestige/tokenizer.hpp>
+
 #include <onnxruntime_cxx_api.h>
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <numeric>
 
 namespace prestige::internal {
@@ -20,7 +23,18 @@ class OnnxEmbedder : public Embedder {
             OrtAllocatorType::OrtArenaAllocator,
             OrtMemType::OrtMemTypeDefault)) {}
 
-  bool Initialize(const std::string& model_path, std::string* error_out) {
+  bool Initialize(const std::string& model_path,
+                  const std::string& vocab_path,
+                  std::string* error_out) {
+    // Load tokenizer
+    tokenizer_ = WordPieceTokenizer::Create(vocab_path, error_out);
+    if (!tokenizer_) {
+      if (error_out && error_out->empty()) {
+        *error_out = "Failed to load tokenizer from: " + vocab_path;
+      }
+      return false;
+    }
+
     try {
       Ort::SessionOptions session_options;
       session_options.SetIntraOpNumThreads(1);
@@ -67,77 +81,44 @@ class OnnxEmbedder : public Embedder {
     EmbeddingResult result;
 
     try {
-      // For sentence-transformers models exported with optimum,
-      // the model typically expects tokenized input (input_ids, attention_mask).
-      // However, some exports include the tokenizer in the graph.
-      //
-      // This implementation assumes a model that accepts:
-      // - input_ids: int64 tensor [batch_size, sequence_length]
-      // - attention_mask: int64 tensor [batch_size, sequence_length]
-      //
-      // For simplicity, we use a basic tokenization approach here.
-      // A production implementation would use a proper tokenizer.
-
-      // Simple word-piece-like tokenization (placeholder)
-      // In practice, you'd use the model's actual tokenizer
-      std::vector<int64_t> input_ids;
-      std::vector<int64_t> attention_mask;
-
-      // CLS token
-      input_ids.push_back(101);  // [CLS]
-      attention_mask.push_back(1);
-
-      // Simple character-based tokenization (placeholder)
-      // Real implementation needs proper WordPiece/BPE tokenizer
-      size_t max_tokens = 510;  // Reserve space for [CLS] and [SEP]
-      std::string text_str(text);
-
-      // Very basic word splitting
-      size_t pos = 0;
-      size_t token_count = 0;
-      while (pos < text_str.size() && token_count < max_tokens) {
-        // Skip whitespace
-        while (pos < text_str.size() && std::isspace(text_str[pos])) {
-          pos++;
-        }
-        if (pos >= text_str.size()) break;
-
-        // Find end of word
-        size_t end = pos;
-        while (end < text_str.size() && !std::isspace(text_str[end])) {
-          end++;
-        }
-
-        // Use a hash of the word as a pseudo-token ID
-        // This is a placeholder - real tokenization needed
-        std::string word = text_str.substr(pos, end - pos);
-        int64_t token_id = 1000 + (std::hash<std::string>{}(word) % 28000);
-        input_ids.push_back(token_id);
-        attention_mask.push_back(1);
-        token_count++;
-        pos = end;
+      // Tokenize the input text using WordPiece tokenizer
+      TokenizerResult tokens = tokenizer_->Tokenize(text, 512);
+      if (!tokens.success) {
+        result.error_message = "Tokenization failed: " + tokens.error_message;
+        return result;
       }
 
-      // SEP token
-      input_ids.push_back(102);  // [SEP]
-      attention_mask.push_back(1);
-
       // Create input tensors
-      std::vector<int64_t> input_shape = {1, static_cast<int64_t>(input_ids.size())};
+      std::vector<int64_t> input_shape = {
+          1, static_cast<int64_t>(tokens.input_ids.size())};
 
+      // Build input tensors in the order expected by the model
       std::vector<Ort::Value> input_tensors;
-      input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
-          memory_info_, input_ids.data(), input_ids.size(),
-          input_shape.data(), input_shape.size()));
-      input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
-          memory_info_, attention_mask.data(), attention_mask.size(),
-          input_shape.data(), input_shape.size()));
+      for (const auto& name : input_names_str_) {
+        if (name == "input_ids") {
+          input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
+              memory_info_, tokens.input_ids.data(), tokens.input_ids.size(),
+              input_shape.data(), input_shape.size()));
+        } else if (name == "attention_mask") {
+          input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
+              memory_info_, tokens.attention_mask.data(),
+              tokens.attention_mask.size(), input_shape.data(),
+              input_shape.size()));
+        } else if (name == "token_type_ids") {
+          input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
+              memory_info_, tokens.token_type_ids.data(),
+              tokens.token_type_ids.size(), input_shape.data(),
+              input_shape.size()));
+        } else {
+          result.error_message = "Unknown input name: " + name;
+          return result;
+        }
+      }
 
       // Run inference
       auto output_tensors = session_->Run(
-          Ort::RunOptions{nullptr},
-          input_names_.data(), input_tensors.data(), input_tensors.size(),
-          output_names_.data(), output_names_.size());
+          Ort::RunOptions{nullptr}, input_names_.data(), input_tensors.data(),
+          input_tensors.size(), output_names_.data(), output_names_.size());
 
       if (output_tensors.empty()) {
         result.error_message = "No output tensors";
@@ -152,7 +133,6 @@ class OnnxEmbedder : public Embedder {
       // Output shape is typically [batch_size, sequence_length, hidden_size]
       // or [batch_size, hidden_size] for pooled output
       float* output_data = output_tensor.GetTensorMutableData<float>();
-      size_t total_elements = tensor_info.GetElementCount();
 
       // Mean pooling over sequence dimension if needed
       if (shape.size() == 3) {
@@ -164,7 +144,8 @@ class OnnxEmbedder : public Embedder {
 
         // Mean pooling with attention mask
         for (int64_t i = 0; i < seq_len; ++i) {
-          if (i < static_cast<int64_t>(attention_mask.size()) && attention_mask[i]) {
+          if (i < static_cast<int64_t>(tokens.attention_mask.size()) &&
+              tokens.attention_mask[i]) {
             for (int64_t j = 0; j < hidden_size; ++j) {
               result.embedding[j] += output_data[i * hidden_size + j];
             }
@@ -172,8 +153,8 @@ class OnnxEmbedder : public Embedder {
         }
 
         // Divide by number of non-padding tokens
-        float mask_sum = static_cast<float>(
-            std::count(attention_mask.begin(), attention_mask.end(), 1));
+        float mask_sum = static_cast<float>(std::count(
+            tokens.attention_mask.begin(), tokens.attention_mask.end(), 1));
         if (mask_sum > 0) {
           for (float& v : result.embedding) {
             v /= mask_sum;
@@ -211,17 +192,15 @@ class OnnxEmbedder : public Embedder {
     return result;
   }
 
-  size_t Dimension() const override {
-    return dimension_;
-  }
+  size_t Dimension() const override { return dimension_; }
 
-  EmbedderModelType ModelType() const override {
-    return model_type_;
-  }
+  EmbedderModelType ModelType() const override { return model_type_; }
 
  private:
   EmbedderModelType model_type_;
   size_t dimension_;
+
+  std::unique_ptr<WordPieceTokenizer> tokenizer_;
 
   Ort::Env env_;
   Ort::MemoryInfo memory_info_;
@@ -233,15 +212,51 @@ class OnnxEmbedder : public Embedder {
   std::vector<const char*> output_names_;
 };
 
-std::unique_ptr<Embedder> Embedder::Create(
-    const std::string& model_path,
-    EmbedderModelType type,
-    std::string* error_out) {
+namespace {
+
+// Find vocab.txt in the same directory as the model
+std::string FindVocabPath(const std::string& model_path) {
+  // Get directory of model file
+  size_t last_slash = model_path.find_last_of("/\\");
+  std::string dir = (last_slash != std::string::npos)
+                        ? model_path.substr(0, last_slash + 1)
+                        : "./";
+
+  // Look for vocab.txt in the same directory
+  std::string vocab_path = dir + "vocab.txt";
+  std::ifstream check(vocab_path);
+  if (check.good()) {
+    return vocab_path;
+  }
+
+  // Try without path (current directory)
+  check.open("vocab.txt");
+  if (check.good()) {
+    return "vocab.txt";
+  }
+
+  return "";
+}
+
+}  // namespace
+
+std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
+                                           EmbedderModelType type,
+                                           std::string* error_out) {
+  // Auto-detect vocab path
+  std::string vocab_path = FindVocabPath(model_path);
+  if (vocab_path.empty()) {
+    if (error_out) {
+      *error_out = "Could not find vocab.txt in the same directory as " +
+                   model_path + ". Please place vocab.txt alongside the model.";
+    }
+    return nullptr;
+  }
 
   size_t dimension = 384;  // Both MiniLM and BGE-small use 384 dimensions
 
   auto embedder = std::make_unique<OnnxEmbedder>(type, dimension);
-  if (!embedder->Initialize(model_path, error_out)) {
+  if (!embedder->Initialize(model_path, vocab_path, error_out)) {
     return nullptr;
   }
 
@@ -254,12 +269,12 @@ std::unique_ptr<Embedder> Embedder::Create(
 
 namespace prestige::internal {
 
-std::unique_ptr<Embedder> Embedder::Create(
-    const std::string& /*model_path*/,
-    EmbedderModelType /*type*/,
-    std::string* error_out) {
+std::unique_ptr<Embedder> Embedder::Create(const std::string& /*model_path*/,
+                                           EmbedderModelType /*type*/,
+                                           std::string* error_out) {
   if (error_out) {
-    *error_out = "Semantic dedup not enabled. Rebuild with PRESTIGE_ENABLE_SEMANTIC=ON";
+    *error_out =
+        "Semantic dedup not enabled. Rebuild with PRESTIGE_ENABLE_SEMANTIC=ON";
   }
   return nullptr;
 }

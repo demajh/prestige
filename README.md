@@ -228,6 +228,9 @@ sudo apt-get install librocksdb-dev
 # macOS
 brew install rocksdb
 
+# For semantic mode (macOS)
+brew install onnxruntime
+
 # For semantic mode (Ubuntu)
 wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
 tar -xzf onnxruntime-linux-x64-1.16.3.tgz
@@ -248,9 +251,16 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 sudo make install
 
-# With semantic dedup
+# With semantic dedup (Linux)
 cmake .. -DCMAKE_BUILD_TYPE=Release -DPRESTIGE_ENABLE_SEMANTIC=ON
 make -j$(nproc)
+sudo make install
+
+# With semantic dedup (macOS with Homebrew)
+cmake .. -DCMAKE_BUILD_TYPE=Release -DPRESTIGE_ENABLE_SEMANTIC=ON \
+  -DONNXRUNTIME_INCLUDE_DIR=/opt/homebrew/include/onnxruntime \
+  -DONNXRUNTIME_LIBRARY=/opt/homebrew/lib/libonnxruntime.dylib
+make -j$(sysctl -n hw.ncpu)
 sudo make install
 ```
 
@@ -278,17 +288,21 @@ g++ -std=c++17 my_app.cpp $(pkg-config --cflags --libs prestige_uvs) -o my_app
 
 ### Obtaining an ONNX Model (for semantic mode)
 
+Download a pre-exported model and vocabulary from Hugging Face:
+
 ```bash
-pip install optimum[onnxruntime]
+mkdir -p models && cd models
 
-# Export all-MiniLM-L6-v2 (recommended)
-optimum-cli export onnx --model sentence-transformers/all-MiniLM-L6-v2 \
-    --task feature-extraction ./minilm_onnx/
+# Download BGE-small-en-v1.5 (recommended)
+curl -LO https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model.onnx
+curl -LO https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/vocab.txt
 
-# Or export BGE-small-en-v1.5
-optimum-cli export onnx --model BAAI/bge-small-en-v1.5 \
-    --task feature-extraction ./bge_small_onnx/
+# Or download all-MiniLM-L6-v2
+curl -LO https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+curl -LO https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/vocab.txt
 ```
+
+**Important:** The `vocab.txt` file must be in the same directory as `model.onnx`. Prestige auto-detects the vocabulary file.
 
 ---
 
@@ -305,7 +319,8 @@ optimum-cli export onnx --model BAAI/bge-small-en-v1.5 \
 **Semantic dedup example:**
 
 ```bash
-./build/prestige_example_semantic ./minilm_onnx/model.onnx
+# Assumes models/model.onnx and models/vocab.txt exist
+./build/prestige_example_semantic ./models/model.onnx
 ```
 
 ### CLI
@@ -345,8 +360,8 @@ db->Put("key2", "value1");  // Deduplicates with key1
 
 prestige::Options opt;
 opt.dedup_mode = prestige::DedupMode::kSemantic;
-opt.semantic_model_path = "./minilm_onnx/model.onnx";
-opt.semantic_model_type = prestige::SemanticModel::kMiniLM;
+opt.semantic_model_path = "./models/model.onnx";  // vocab.txt auto-detected in same dir
+opt.semantic_model_type = prestige::SemanticModel::kBGESmall;
 opt.semantic_threshold = 0.85f;  // Cosine similarity threshold
 
 std::unique_ptr<prestige::Store> db;
@@ -377,7 +392,7 @@ db->Put("key2", "A fast brown fox leaps above a sleepy dog.");  // Semantic matc
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `semantic_model_path` | (required) | Path to ONNX model file |
+| `semantic_model_path` | (required) | Path to ONNX model file (vocab.txt auto-detected in same directory) |
 | `semantic_model_type` | `kMiniLM` | Model type: `kMiniLM` or `kBGESmall` |
 | `semantic_threshold` | (required) | Cosine similarity threshold [0.0, 1.0] |
 | `semantic_max_text_bytes` | 8192 | Max text bytes to embed (longer texts truncated) |
@@ -470,7 +485,6 @@ If you want to take this beyond a prototype, the next steps tend to be:
 - Optional value canonicalization before hashing (exact mode).
 - Background GC / tombstone handling modes (instead of immediate delete).
 - FAISS backend for semantic mode (IVF+PQ for larger scale).
-- Proper tokenization for embedding models (currently uses simplified tokenization).
 - Hybrid mode: exact dedup with semantic fallback.
 
 ---
