@@ -178,19 +178,21 @@ sudo apt-get install prestige-dev
 **Or install .deb directly:**
 
 ```bash
-# Download and install (replace VERSION with actual version, e.g., 0.1.0)
-curl -LO https://github.com/demajh/prestige/releases/latest/download/prestige_VERSION-1_amd64.deb
-sudo dpkg -i prestige_VERSION-1_amd64.deb
+curl -LO https://github.com/demajh/prestige/releases/download/v0.1.0/prestige_0.1.0_amd64.deb
+sudo dpkg -i prestige_0.1.0_amd64.deb
 sudo apt-get install -f  # Install dependencies if needed
 ```
 
-### Quick Install (macOS with Homebrew)
+### Quick Install (macOS)
+
+Download the pre-built binary from the [Releases page](https://github.com/demajh/prestige/releases):
 
 ```bash
-# Add the tap and install
-brew tap demajh/prestige
-brew install prestige
+curl -LO https://github.com/demajh/prestige/releases/download/v0.1.0/prestige-0.1.0-macos-arm64.tar.gz
+sudo tar -xzf prestige-0.1.0-macos-arm64.tar.gz -C /usr/local
 ```
+
+Or build from source (see below).
 
 ### Quick Install (from binary release)
 
