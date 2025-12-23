@@ -251,13 +251,14 @@ rocksdb::Status Store::Open(const std::string& db_path,
           "Failed to create embedder: " + embedder_error);
     }
 
-    // Create vector index
+    // Create vector index with optional capacity limit
     size_t dimension = store->embedder_->Dimension();
     store->vector_index_ = internal::CreateHNSWIndex(
         dimension,
         10000,  // Initial max elements (will grow as needed)
         opt.hnsw_m,
-        opt.hnsw_ef_construction);
+        opt.hnsw_ef_construction,
+        opt.semantic_max_index_entries);
 
     if (!store->vector_index_) {
       store->Close();
@@ -265,6 +266,11 @@ rocksdb::Status Store::Open(const std::string& db_path,
     }
 
     store->vector_index_->SetSearchParam("ef_search", opt.hnsw_ef_search);
+
+    // Set max entries limit if specified (for memory safety)
+    if (opt.semantic_max_index_entries > 0) {
+      store->vector_index_->SetMaxEntries(opt.semantic_max_index_entries);
+    }
 
     // Load existing index if present
     store->vector_index_path_ = db_path + ".vec_index";
@@ -910,19 +916,78 @@ rocksdb::Status Store::GetHealth(HealthStats* stats) const {
   return rocksdb::Status::OK();
 }
 
+rocksdb::Status Store::Flush() {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+
+  EmitCounter(opt_, "prestige.flush.calls", 1);
+  const uint64_t start_us = prestige::internal::NowMicros();
+
+  // Flush all column families with WAL sync
+  rocksdb::FlushOptions flush_opts;
+  flush_opts.wait = true;  // Wait for flush to complete
+  flush_opts.allow_write_stall = true;  // Allow stalling writes during flush
+
+  rocksdb::Status s = db_->Flush(flush_opts, handles_);
+  if (!s.ok()) {
+    EmitCounter(opt_, "prestige.flush.error_total", 1);
+    return s;
+  }
+
+  // Sync WAL to ensure durability
+  s = db_->SyncWAL();
+  if (!s.ok()) {
+    EmitCounter(opt_, "prestige.flush.sync_error_total", 1);
+    return s;
+  }
+
+  EmitHistogram(opt_, "prestige.flush.latency_us",
+                prestige::internal::NowMicros() - start_us);
+  EmitCounter(opt_, "prestige.flush.ok_total", 1);
+
+  return rocksdb::Status::OK();
+}
+
 void Store::Close() {
   if (!db_) return;
+
+  // Flush all pending data before closing
+  rocksdb::Status flush_status = Flush();
+  if (!flush_status.ok()) {
+    EmitCounter(opt_, "prestige.close.flush_error_total", 1);
+    // Continue with close even if flush fails
+  }
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Save vector index before closing
   if (vector_index_ && !vector_index_path_.empty()) {
-    vector_index_->Save(vector_index_path_);
+    bool save_ok = vector_index_->Save(vector_index_path_);
+    if (save_ok) {
+      // Clear pending ops now that vector index is saved
+      ClearPendingVectorOps();
+      EmitCounter(opt_, "prestige.close.vector_save_ok_total", 1);
+
+      // Compact if we have many deleted entries
+      if (opt_.semantic_compact_threshold > 0) {
+        size_t deleted = vector_index_->DeletedCount();
+        if (deleted >= opt_.semantic_compact_threshold) {
+          if (vector_index_->Compact()) {
+            // Save again after compaction
+            vector_index_->Save(vector_index_path_);
+            EmitCounter(opt_, "prestige.close.compact_ok_total", 1);
+          }
+        }
+      }
+    } else {
+      EmitCounter(opt_, "prestige.close.vector_save_error_total", 1);
+      // Don't clear pending ops - they'll be replayed on next open
+    }
   }
 
   // Release semantic resources
   vector_index_.reset();
   embedder_.reset();
   embeddings_cf_ = nullptr;
+  vector_pending_cf_ = nullptr;
 #endif
 
   for (auto* h : handles_) delete h;
@@ -930,6 +995,8 @@ void Store::Close() {
   delete db_;
   db_ = nullptr;
   user_kv_cf_ = objects_cf_ = dedup_cf_ = refcount_cf_ = meta_cf_ = lru_cf_ = nullptr;
+
+  EmitCounter(opt_, "prestige.close.ok_total", 1);
 }
 
 static rocksdb::Status AdjustRefcountLocked(rocksdb::Transaction* txn,
@@ -1457,25 +1524,44 @@ void Store::ApplyPendingVectorOps(
     const std::vector<std::pair<std::string, std::vector<float>>>& pending_adds) {
   if (!vector_index_) return;
 
-  // Apply deletes
+  // Apply deletes to in-memory index
   for (const auto& obj_id : pending_deletes) {
     vector_index_->MarkDeleted(obj_id);
   }
 
-  // Apply adds
+  // Apply adds to in-memory index
   for (const auto& [obj_id, embedding] : pending_adds) {
     if (!vector_index_->Add(embedding, obj_id)) {
       EmitCounter(opt_, "prestige.semantic.index_add_error_total", 1);
     }
   }
 
-  // Clear pending ops from RocksDB (best-effort, outside transaction)
+  // NOTE: We do NOT clear pending ops here. They remain in vector_pending_cf
+  // until the vector index is saved to disk. This ensures crash recovery can
+  // replay any ops that were applied to memory but not yet persisted.
+  // The pending ops are cleared during periodic saves (after vector_index_->Save()).
+}
+
+// Clear pending vector ops from RocksDB after successful vector index save
+void Store::ClearPendingVectorOps() {
+  if (!db_ || !vector_pending_cf_) return;
+
+  rocksdb::ReadOptions ro;
   rocksdb::WriteOptions wo;
-  for (const auto& obj_id : pending_deletes) {
-    (void)db_->Delete(wo, vector_pending_cf_, rocksdb::Slice(obj_id));
+  wo.sync = true;  // Ensure durability
+
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, vector_pending_cf_));
+  rocksdb::WriteBatch batch;
+
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    batch.Delete(vector_pending_cf_, it->key());
   }
-  for (const auto& [obj_id, embedding] : pending_adds) {
-    (void)db_->Delete(wo, vector_pending_cf_, rocksdb::Slice(obj_id));
+
+  if (batch.Count() > 0) {
+    rocksdb::Status s = db_->Write(wo, &batch);
+    if (s.ok()) {
+      EmitCounter(opt_, "prestige.semantic.pending_cleared", batch.Count());
+    }
   }
 }
 
@@ -1809,13 +1895,36 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
         ApplyPendingVectorOps(pending_deletes, pending_adds);
       }
 
-      // Periodic index save
+      // Periodic index save with synchronization
       if (creating_new_object) {
         semantic_inserts_since_save_++;
         if (opt_.semantic_index_save_interval > 0 &&
             semantic_inserts_since_save_ >= static_cast<uint64_t>(opt_.semantic_index_save_interval)) {
-          if (vector_index_->Save(vector_index_path_)) {
-            semantic_inserts_since_save_ = 0;
+          // Sync RocksDB WAL before saving vector index to ensure consistency
+          rocksdb::Status sync_status = db_->SyncWAL();
+          if (sync_status.ok()) {
+            if (vector_index_->Save(vector_index_path_)) {
+              semantic_inserts_since_save_ = 0;
+              EmitCounter(opt_, "prestige.semantic.index_save_ok_total", 1);
+
+              // Now that vector index is saved, clear pending ops from RocksDB
+              ClearPendingVectorOps();
+
+              // Check if compaction is needed
+              if (opt_.semantic_compact_threshold > 0) {
+                size_t deleted = vector_index_->DeletedCount();
+                if (deleted >= opt_.semantic_compact_threshold) {
+                  if (vector_index_->Compact()) {
+                    vector_index_->Save(vector_index_path_);
+                    EmitCounter(opt_, "prestige.semantic.compact_ok_total", 1);
+                  }
+                }
+              }
+            } else {
+              EmitCounter(opt_, "prestige.semantic.index_save_error_total", 1);
+            }
+          } else {
+            EmitCounter(opt_, "prestige.semantic.wal_sync_error_total", 1);
           }
         }
       }

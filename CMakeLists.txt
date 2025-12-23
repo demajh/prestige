@@ -88,6 +88,7 @@ endif()
 set(PRESTIGE_SOURCES
   src/store.cpp
   src/normalize.cpp
+  src/shutdown.cpp
 )
 
 if(PRESTIGE_ENABLE_SEMANTIC)

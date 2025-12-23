@@ -213,6 +213,18 @@ struct Options {
   int faiss_nprobe = 10;          // Clusters to search at query time
   int faiss_pq_m = 48;            // PQ sub-quantizers (must divide 384)
   int faiss_pq_nbits = 8;         // Bits per sub-quantizer
+
+  // Vector index memory limit (semantic mode only).
+  // Maximum number of entries in the vector index before LRU eviction.
+  // When exceeded, oldest entries are evicted to make room for new ones.
+  // Set to 0 for unlimited (default, but will OOM at scale).
+  // Recommended: 1000000 (1M entries) for most deployments.
+  size_t semantic_max_index_entries = 0;
+
+  // Compact vector index after this many deletions.
+  // Compaction rebuilds the index to reclaim memory from soft-deleted entries.
+  // Set to 0 to disable automatic compaction.
+  size_t semantic_compact_threshold = 10000;
 };
 
 /**
@@ -300,7 +312,18 @@ class Store {
 			   uint64_t limit = 0,
 			   std::string_view prefix = {}) const;
   
-  /** Close the store and release RocksDB resources. Safe to call multiple times. */
+  /**
+   * Flush all pending writes to disk with fsync.
+   * Ensures durability of all data written so far.
+   * Returns OK on success.
+   */
+  rocksdb::Status Flush();
+
+  /**
+   * Close the store and release RocksDB resources.
+   * Automatically flushes all pending data before closing.
+   * Safe to call multiple times.
+   */
   void Close();
 
   /** Emit current cache statistics to the metrics sink.
@@ -373,6 +396,8 @@ class Store {
   // Apply pending vector index operations after successful commit
   void ApplyPendingVectorOps(const std::vector<std::string>& pending_deletes,
                              const std::vector<std::pair<std::string, std::vector<float>>>& pending_adds);
+  // Clear pending vector ops from RocksDB after successful vector index save
+  void ClearPendingVectorOps();
   // Replay any pending vector ops from previous run (crash recovery)
   void ReplayPendingVectorOps();
 #endif
