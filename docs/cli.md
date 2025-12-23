@@ -45,11 +45,23 @@ prestige_cli ./db keys "user:" 100        # List up to 100 keys with prefix "use
 
 ### Count
 
-Count keys and unique values:
+Count keys and unique values (exact, requires full scan):
 
 ```bash
 prestige_cli ./db count
+# Output: keys=1000 unique_values=500
 ```
+
+### Count (Approximate)
+
+Get approximate counts using RocksDB's internal estimates (O(1), no scan):
+
+```bash
+prestige_cli ./db count-approx
+# Output: keys~=1000 unique_values~=500 bytes~=1048576 (approximate)
+```
+
+Use this for large stores where full scans take too long. Estimates may be 10-50% off, especially after many deletes.
 
 ### Health
 

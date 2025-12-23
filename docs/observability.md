@@ -37,6 +37,12 @@ struct MetricsSink {
 ### Transaction
 
 - **Histogram**: `prestige.txn.wait_us` (time spent waiting due to lock contention/retries)
+- **Histogram**: `prestige.txn.backoff_us` (backoff delay before each retry)
+
+### LRU Tracking
+
+- **Counter**: `prestige.lru.update_total` (LRU index writes that occurred)
+- **Counter**: `prestige.lru.skip_total` (LRU writes skipped due to `lru_update_interval_seconds`)
 
 ### GC
 
@@ -44,8 +50,10 @@ struct MetricsSink {
 
 ### Semantic Mode (additional)
 
-- **Counters**: `prestige.semantic.hit_total`, `prestige.semantic.miss_total`, `prestige.put.embed_error_total`, `prestige.semantic.index_add_error_total`
+- **Counters**: `prestige.semantic.hit_total`, `prestige.semantic.miss_total`, `prestige.semantic.stale_match_total`, `prestige.put.embed_error_total`, `prestige.semantic.index_add_error_total`, `prestige.semantic.pending_replayed`
 - **Histograms**: `prestige.put.embed_us`, `prestige.semantic.lookup_us`, `prestige.semantic.candidates_checked`
+
+Note: `prestige.semantic.stale_match_total` counts cases where a semantic match was found but the object was deleted before the transaction could use it (race condition recovery).
 
 ### Cache (via `EmitCacheMetrics()`)
 
@@ -100,8 +108,10 @@ If `Options::tracer` is set, the store emits spans:
 
 - `retry.user_key_lock` - Retry due to user key lock contention
 - `retry.dedup_lock` - Retry due to dedup index lock contention
+- `retry.object_lock` - Retry due to object lock contention (semantic mode)
 - `retry.commit` - Retry due to commit conflict
 - `gc.delete_object` - Object was garbage collected
+- `semantic.stale_match` - Semantic match was stale (object was GC'd between search and transaction)
 
 ## Example Implementation
 

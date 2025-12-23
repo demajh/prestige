@@ -38,12 +38,25 @@ Close the store and release RocksDB resources. Safe to call multiple times.
 ### Enumeration Methods
 
 ```cpp
+// Exact counts - O(N) full scan
 rocksdb::Status CountKeys(uint64_t* out_key_count) const;
 rocksdb::Status CountUniqueValues(uint64_t* out_unique_value_count) const;
+
+// Approximate counts - O(1) using RocksDB estimates
+// Fast but may be 10-50% off, especially after many deletes
+rocksdb::Status CountKeysApprox(uint64_t* out_key_count) const;
+rocksdb::Status CountUniqueValuesApprox(uint64_t* out_unique_value_count) const;
+rocksdb::Status GetTotalStoreBytesApprox(uint64_t* out_bytes) const;
+
 rocksdb::Status ListKeys(std::vector<std::string>* out_keys,
                          uint64_t limit = 0,
                          std::string_view prefix = {}) const;
 ```
+
+**When to use approximate methods:**
+- Dashboards and monitoring where exact counts aren't critical
+- Health checks on large stores (100M+ keys) where full scans take minutes
+- Any read path where you need counts without blocking
 
 ### Cache Management Methods
 
@@ -91,8 +104,22 @@ Emit current cache statistics to the metrics sink. Call periodically for observa
 | `bloom_bits_per_key` | 10 | Bloom filter bits per key (for point-lookups) |
 | `lock_timeout_ms` | 2000 | TransactionDB lock timeout |
 | `max_retries` | 16 | Max transaction retries on conflicts/busy statuses |
+| `retry_base_delay_us` | 1000 | Base delay for exponential backoff (1ms) |
+| `retry_max_delay_us` | 100000 | Maximum backoff delay cap (100ms) |
+| `retry_jitter_factor` | 0.5 | Jitter factor ±50% to prevent thundering herd |
 | `enable_gc` | true | Whether to delete objects when refcount reaches 0 |
 | `dedup_mode` | `kExact` | Deduplication mode: `kExact` or `kSemantic` |
+
+**Retry backoff formula:** `min(max_delay, base_delay * 2^attempt) * random(1 ± jitter/2)`
+
+Example backoff progression with defaults:
+| Attempt | Delay Range |
+|---------|-------------|
+| 1 | 0.75-1.25ms |
+| 2 | 1.5-2.5ms |
+| 3 | 3-5ms |
+| 4 | 6-10ms |
+| 5+ | up to 75-125ms |
 
 ### Cache Behavior Options
 
@@ -102,6 +129,17 @@ Emit current cache statistics to the metrics sink. Call periodically for observa
 | `max_store_bytes` | 0 | Maximum store size in bytes (0 = unlimited) |
 | `eviction_target_ratio` | 0.8 | When evicting, reduce to this ratio of max_store_bytes |
 | `track_access_time` | true | Track last access time for LRU (slight overhead on Get) |
+| `lru_update_interval_seconds` | 3600 | Minimum interval between LRU updates for same object |
+
+**LRU update interval:** By default, LRU timestamps are only updated once per hour per object.
+This dramatically reduces write amplification for read-heavy workloads (an object read 10K times/hour generates 1 LRU write instead of 10K).
+
+| Value | Behavior |
+|-------|----------|
+| 0 | Update on every Get (original behavior, maximum write load) |
+| 60 | At most once per minute (good balance) |
+| 3600 | At most once per hour (default, minimal writes) |
+| 86400 | At most once per day (coarse LRU for archival workloads) |
 
 ### Text Normalization Options
 
