@@ -34,6 +34,10 @@ if(NOT ROCKSDB_INCLUDE_DIR OR NOT ROCKSDB_LIBRARY)
   message(FATAL_ERROR "Could not find RocksDB. Set ROCKSDB_INCLUDE_DIR and ROCKSDB_LIBRARY or install RocksDB dev packages.")
 endif()
 
+# --- Find OpenSSL (required for SHA-256) ---
+find_package(OpenSSL REQUIRED)
+message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+
 # --- Semantic dedup dependencies (optional) ---
 if(PRESTIGE_ENABLE_SEMANTIC)
   # Find ONNX Runtime
@@ -100,6 +104,7 @@ target_include_directories(prestige_uvs
 target_link_libraries(prestige_uvs
   PUBLIC
     ${ROCKSDB_LIBRARY}
+    OpenSSL::Crypto
     pthread
 )
 

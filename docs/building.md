@@ -7,6 +7,7 @@
 - CMake 3.16+
 - C++17 compiler (GCC 8+, Clang 7+, or MSVC 2019+)
 - RocksDB with TransactionDB support
+- OpenSSL (for SHA-256 hashing)
 
 ### Optional (for semantic mode)
 
@@ -18,7 +19,7 @@
 ### Ubuntu/Debian
 
 ```bash
-sudo apt-get install librocksdb-dev
+sudo apt-get install librocksdb-dev libssl-dev
 
 # For semantic mode
 wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
