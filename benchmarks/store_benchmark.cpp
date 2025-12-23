@@ -21,8 +21,43 @@ namespace {
 class StoreBenchmark : public benchmark::Fixture {
  protected:
   void SetUp(const benchmark::State& state) override {
-    test_dir_ = std::filesystem::temp_directory_path() / ("prestige_bench_" + RandomSuffix());
-    std::filesystem::create_directories(test_dir_);
+    // Get temp directory with fallback options
+    std::filesystem::path temp_base;
+    std::error_code ec;
+
+    // Try standard temp directory first
+    temp_base = std::filesystem::temp_directory_path(ec);
+    if (ec || temp_base.empty()) {
+      // Fallback to common temp paths
+      if (std::filesystem::exists("/tmp", ec)) {
+        temp_base = "/tmp";
+      } else if (std::filesystem::exists("/var/tmp", ec)) {
+        temp_base = "/var/tmp";
+      } else {
+        // Last resort: use current directory
+        temp_base = std::filesystem::current_path(ec);
+        if (ec) {
+          temp_base = ".";
+        }
+      }
+    }
+
+    // Ensure base directory exists
+    if (!std::filesystem::exists(temp_base, ec)) {
+      std::filesystem::create_directories(temp_base, ec);
+    }
+
+    test_dir_ = temp_base / ("prestige_bench_" + RandomSuffix());
+
+    // Create test directory with error handling
+    ec.clear();
+    std::filesystem::create_directories(test_dir_, ec);
+    if (ec) {
+      // If we can't create in temp, try current directory
+      test_dir_ = std::filesystem::path(".") / ("prestige_bench_" + RandomSuffix());
+      std::filesystem::create_directories(test_dir_, ec);
+    }
+
     db_path_ = (test_dir_ / "bench_db").string();
   }
 

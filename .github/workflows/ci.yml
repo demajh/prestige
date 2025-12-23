@@ -126,14 +126,19 @@ jobs:
       - name: Generate coverage report
         run: |
           cd build
-          lcov --directory . --capture --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' '*/googletest/*' '*/tests/*' '*/build/_deps/*' --output-file coverage.info.cleaned
-          lcov --list coverage.info.cleaned
+          # Use --ignore-errors to handle gcov version mismatches with lambdas/templates
+          lcov --directory . --capture --output-file coverage.info \
+            --ignore-errors mismatch,mismatch \
+            --rc geninfo_unexecuted_blocks=1
+          lcov --remove coverage.info '/usr/*' '*/googletest/*' '*/tests/*' '*/build/_deps/*' \
+            --output-file coverage.info.cleaned \
+            --ignore-errors mismatch,mismatch
+          lcov --list coverage.info.cleaned --ignore-errors mismatch,mismatch
 
       - name: Check coverage threshold
         run: |
           cd build
-          COVERAGE=$(lcov --summary coverage.info.cleaned 2>&1 | grep 'lines' | sed 's/.*: //' | sed 's/%.*//')
+          COVERAGE=$(lcov --summary coverage.info.cleaned --ignore-errors mismatch,mismatch 2>&1 | grep 'lines' | sed 's/.*: //' | sed 's/%.*//')
           echo "Line coverage: ${COVERAGE}%"
           # Fail if coverage is below 80%
           if (( $(echo "$COVERAGE < 80" | bc -l) )); then
