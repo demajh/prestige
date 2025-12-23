@@ -13,6 +13,7 @@
 
 #include <prestige/internal.hpp>
 #include <prestige/normalize.hpp>
+#include <prestige/test_utils.hpp>
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 #include <prestige/embedder.hpp>
@@ -148,6 +149,13 @@ Store::Store(const Options& opt) : opt_(opt) {}
 
 Store::~Store() { Close(); }
 
+uint64_t Store::GetWallClockMicros() const {
+  if (opt_.custom_clock) {
+    return opt_.custom_clock->WallClockMicros();
+  }
+  return internal::WallClockMicros();
+}
+
 rocksdb::Status Store::Open(const std::string& db_path,
                             std::unique_ptr<Store>* out,
                             const Options& opt) {
@@ -156,9 +164,9 @@ rocksdb::Status Store::Open(const std::string& db_path,
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Validate semantic mode options
   if (opt.dedup_mode == DedupMode::kSemantic) {
-    if (opt.semantic_model_path.empty()) {
+    if (opt.semantic_model_path.empty() && !opt.custom_embedder) {
       return rocksdb::Status::InvalidArgument(
-          "semantic_model_path is required when dedup_mode == kSemantic");
+          "semantic_model_path or custom_embedder is required when dedup_mode == kSemantic");
     }
     if (opt.semantic_threshold < 0.0f || opt.semantic_threshold > 1.0f) {
       return rocksdb::Status::InvalidArgument(
@@ -236,19 +244,25 @@ rocksdb::Status Store::Open(const std::string& db_path,
     store->embeddings_cf_ = store->handles_[7];
     store->vector_pending_cf_ = store->handles_[8];
 
-    // Create embedder
-    std::string embedder_error;
-    store->embedder_ = internal::Embedder::Create(
-        opt.semantic_model_path,
-        opt.semantic_model_type == SemanticModel::kMiniLM
-            ? internal::EmbedderModelType::kMiniLM
-            : internal::EmbedderModelType::kBGESmall,
-        &embedder_error);
+    // Create or use provided embedder
+    if (opt.custom_embedder) {
+      // Use the custom embedder (takes ownership)
+      store->embedder_.reset(opt.custom_embedder);
+    } else {
+      // Create ONNX embedder from model path
+      std::string embedder_error;
+      store->embedder_ = internal::Embedder::Create(
+          opt.semantic_model_path,
+          opt.semantic_model_type == SemanticModel::kMiniLM
+              ? internal::EmbedderModelType::kMiniLM
+              : internal::EmbedderModelType::kBGESmall,
+          &embedder_error);
 
-    if (!store->embedder_) {
-      store->Close();
-      return rocksdb::Status::InvalidArgument(
-          "Failed to create embedder: " + embedder_error);
+      if (!store->embedder_) {
+        store->Close();
+        return rocksdb::Status::InvalidArgument(
+            "Failed to create embedder: " + embedder_error);
+      }
     }
 
     // Create vector index with optional capacity limit
@@ -344,7 +358,7 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
     if (ms.ok()) {
       prestige::internal::ObjectMeta meta;
       if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) && !meta.IsLegacy()) {
-        uint64_t now_us = prestige::internal::WallClockMicros();
+        uint64_t now_us = GetWallClockMicros();
         uint64_t age_us = now_us - meta.created_at_us;
         uint64_t ttl_us = opt_.default_ttl_seconds * 1000000ULL;
         if (age_us > ttl_us) {
@@ -373,7 +387,7 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
         prestige::internal::ObjectMeta meta;
         if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) && !meta.IsLegacy()) {
           uint64_t old_access_us = meta.last_accessed_us;
-          uint64_t now_us = prestige::internal::WallClockMicros();
+          uint64_t now_us = GetWallClockMicros();
 
           // Only update LRU if enough time has passed since last update.
           // This reduces write amplification for read-heavy workloads.
@@ -617,7 +631,7 @@ rocksdb::Status Store::Sweep(uint64_t* deleted_count) {
   if (!deleted_count) return rocksdb::Status::InvalidArgument("deleted_count is null");
 
   *deleted_count = 0;
-  uint64_t now_us = prestige::internal::WallClockMicros();
+  uint64_t now_us = GetWallClockMicros();
   uint64_t ttl_us = opt_.default_ttl_seconds * 1000000ULL;
 
   const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
@@ -696,7 +710,7 @@ rocksdb::Status Store::Prune(uint64_t max_age_seconds,
   if (!deleted_count) return rocksdb::Status::InvalidArgument("deleted_count is null");
 
   *deleted_count = 0;
-  uint64_t now_us = prestige::internal::WallClockMicros();
+  uint64_t now_us = GetWallClockMicros();
   uint64_t max_age_us = max_age_seconds * 1000000ULL;
   uint64_t max_idle_us = max_idle_seconds * 1000000ULL;
 
@@ -842,7 +856,7 @@ rocksdb::Status Store::GetHealth(HealthStats* stats) const {
   rocksdb::ReadOptions ro;
   ro.snapshot = snapshot;
 
-  uint64_t now_us = prestige::internal::WallClockMicros();
+  uint64_t now_us = GetWallClockMicros();
   uint64_t ttl_us = opt_.default_ttl_seconds * 1000000ULL;
 
   uint64_t oldest_created = UINT64_MAX;
@@ -1236,7 +1250,7 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
         ++batch_writes;
 
         // Create full ObjectMeta with timestamps
-        uint64_t now_us = prestige::internal::WallClockMicros();
+        uint64_t now_us = GetWallClockMicros();
         prestige::internal::ObjectMeta meta;
         meta.digest_key = digest_key;
         meta.created_at_us = now_us;

@@ -51,13 +51,15 @@ struct Tracer {
   virtual std::unique_ptr<TraceSpan> StartSpan(std::string_view name) = 0;
 };
 
-#ifdef PRESTIGE_ENABLE_SEMANTIC
-// Forward declarations for semantic dedup
+// Forward declarations for semantic dedup and testing
 namespace internal {
 class Embedder;
 class VectorIndex;
 }  // namespace internal
-#endif
+
+namespace testing {
+class Clock;
+}  // namespace testing
 
 /** Deduplication mode: either exact (SHA-256) or semantic (embeddings). */
 enum class DedupMode {
@@ -179,12 +181,24 @@ struct Options {
   // Semantic deduplication settings (only used when dedup_mode == kSemantic)
   // ---------------------------------------------------------------------------
 
-  // Path to ONNX model file (REQUIRED for semantic mode)
+  // Path to ONNX model file (required for semantic mode if custom_embedder is null)
   // The vocabulary file (vocab.txt) is expected to be in the same directory.
   std::string semantic_model_path;
 
   // Which embedding model architecture the ONNX file contains
   SemanticModel semantic_model_type = SemanticModel::kMiniLM;
+
+  // Custom embedder for testing (optional).
+  // If provided, semantic_model_path is ignored and this embedder is used.
+  // The Store takes ownership of this pointer.
+  // Set to nullptr to use the ONNX model from semantic_model_path.
+  internal::Embedder* custom_embedder = nullptr;
+
+  // Custom clock for testing (optional).
+  // If provided, the store uses this clock for TTL and LRU timing.
+  // This allows deterministic time control in tests.
+  // The caller retains ownership - must outlive the Store.
+  testing::Clock* custom_clock = nullptr;
 
   // Cosine similarity threshold for dedup [0.0, 1.0] (REQUIRED for semantic mode)
   // Values >= this threshold are considered duplicates.
@@ -382,6 +396,9 @@ class Store {
 
  private:
   explicit Store(const Options& opt);
+
+  // Get current wall clock time in microseconds (uses custom clock if set)
+  uint64_t GetWallClockMicros() const;
 
   rocksdb::Status PutImpl(std::string_view user_key, std::string_view value_bytes);
   rocksdb::Status DeleteImpl(std::string_view user_key);

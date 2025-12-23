@@ -263,6 +263,8 @@ if(PRESTIGE_BUILD_TESTS)
     tests/store_test.cpp
     tests/cache_test.cpp
     tests/integration_test.cpp
+    tests/semantic_test.cpp
+    tests/crash_test.cpp
   )
 
   target_link_libraries(prestige_tests

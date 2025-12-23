@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <prestige/store.hpp>
+#include <prestige/test_utils.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -98,14 +99,19 @@ TEST_F(IntegrationTest, ConcurrentPutsDifferentKeys) {
 
   const int kNumThreads = 4;
   const int kKeysPerThread = 100;
+  testing::TestResultCollector results;
 
   std::vector<std::thread> threads;
   for (int t = 0; t < kNumThreads; ++t) {
-    threads.emplace_back([this, t]() {
+    threads.emplace_back([this, t, &results]() {
       for (int i = 0; i < kKeysPerThread; ++i) {
         std::string key = "thread_" + std::to_string(t) + "_key_" + std::to_string(i);
         std::string value = "value_" + std::to_string(i);
-        ASSERT_TRUE(store_->Put(key, value).ok());
+        if (store_->Put(key, value).ok()) {
+          results.RecordSuccess();
+        } else {
+          results.RecordFailure("Put failed for " + key);
+        }
       }
     });
   }
@@ -113,6 +119,8 @@ TEST_F(IntegrationTest, ConcurrentPutsDifferentKeys) {
   for (auto& t : threads) {
     t.join();
   }
+
+  EXPECT_TRUE(results.AllSucceeded()) << "Failures: " << results.FailureCount();
 
   // All keys should exist
   uint64_t key_count = 0;
@@ -134,6 +142,7 @@ TEST_F(IntegrationTest, ConcurrentReadsAndWrites) {
   std::atomic<bool> running{true};
   std::atomic<int> read_count{0};
   std::atomic<int> write_count{0};
+  testing::TestResultCollector results;
 
   // Reader threads
   std::vector<std::thread> readers;
@@ -155,11 +164,15 @@ TEST_F(IntegrationTest, ConcurrentReadsAndWrites) {
   // Writer threads
   std::vector<std::thread> writers;
   for (int w = 0; w < kNumWriters; ++w) {
-    writers.emplace_back([this, w, &write_count]() {
+    writers.emplace_back([this, w, &write_count, &results]() {
       for (int i = 0; i < kOperations; ++i) {
         std::string key = "new_key_" + std::to_string(w) + "_" + std::to_string(i);
-        ASSERT_TRUE(store_->Put(key, "new_value").ok());
-        write_count++;
+        if (store_->Put(key, "new_value").ok()) {
+          results.RecordSuccess();
+          write_count++;
+        } else {
+          results.RecordFailure("Put failed for " + key);
+        }
       }
     });
   }
@@ -175,6 +188,7 @@ TEST_F(IntegrationTest, ConcurrentReadsAndWrites) {
     r.join();
   }
 
+  EXPECT_TRUE(results.AllSucceeded()) << "Write failures: " << results.FailureCount();
   EXPECT_EQ(write_count.load(), kNumWriters * kOperations);
   EXPECT_GT(read_count.load(), 0);
 }
@@ -218,13 +232,18 @@ TEST_F(IntegrationTest, ConcurrentDeduplication) {
   const int kNumThreads = 4;
   const int kKeysPerThread = 50;
   const std::string kSharedValue = "shared_deduplicated_value";
+  testing::TestResultCollector results;
 
   std::vector<std::thread> threads;
   for (int t = 0; t < kNumThreads; ++t) {
-    threads.emplace_back([this, t, &kSharedValue]() {
+    threads.emplace_back([this, t, &kSharedValue, &results]() {
       for (int i = 0; i < kKeysPerThread; ++i) {
         std::string key = "thread_" + std::to_string(t) + "_key_" + std::to_string(i);
-        ASSERT_TRUE(store_->Put(key, kSharedValue).ok());
+        if (store_->Put(key, kSharedValue).ok()) {
+          results.RecordSuccess();
+        } else {
+          results.RecordFailure("Put failed for " + key);
+        }
       }
     });
   }
@@ -232,6 +251,8 @@ TEST_F(IntegrationTest, ConcurrentDeduplication) {
   for (auto& t : threads) {
     t.join();
   }
+
+  EXPECT_TRUE(results.AllSucceeded()) << "Failures: " << results.FailureCount();
 
   // All keys should exist
   uint64_t key_count = 0;
@@ -503,14 +524,19 @@ TEST_F(IntegrationTest, LargeValueConcurrency) {
   const int kNumThreads = 4;
   const int kValuesPerThread = 10;
   const size_t kValueSize = 100 * 1024;  // 100 KB
+  testing::TestResultCollector results;
 
   std::vector<std::thread> threads;
   for (int t = 0; t < kNumThreads; ++t) {
-    threads.emplace_back([this, t, kValueSize]() {
+    threads.emplace_back([this, t, kValueSize, &results]() {
       std::string large_value(kValueSize, 'x');
       for (int i = 0; i < kValuesPerThread; ++i) {
         std::string key = "large_" + std::to_string(t) + "_" + std::to_string(i);
-        ASSERT_TRUE(store_->Put(key, large_value).ok());
+        if (store_->Put(key, large_value).ok()) {
+          results.RecordSuccess();
+        } else {
+          results.RecordFailure("Put failed for " + key);
+        }
       }
     });
   }
@@ -518,6 +544,8 @@ TEST_F(IntegrationTest, LargeValueConcurrency) {
   for (auto& t : threads) {
     t.join();
   }
+
+  EXPECT_TRUE(results.AllSucceeded()) << "Failures: " << results.FailureCount();
 
   // All values should be deduplicated (same content)
   uint64_t unique_count = 0;
@@ -534,15 +562,20 @@ TEST_F(IntegrationTest, DataIntegrityUnderConcurrency) {
 
   const int kNumThreads = 4;
   const int kKeysPerThread = 50;
+  testing::TestResultCollector results;
 
   // Each thread writes unique values
   std::vector<std::thread> threads;
   for (int t = 0; t < kNumThreads; ++t) {
-    threads.emplace_back([this, t]() {
+    threads.emplace_back([this, t, &results]() {
       for (int i = 0; i < kKeysPerThread; ++i) {
         std::string key = "t" + std::to_string(t) + "_k" + std::to_string(i);
         std::string value = "THREAD_" + std::to_string(t) + "_VALUE_" + std::to_string(i);
-        ASSERT_TRUE(store_->Put(key, value).ok());
+        if (store_->Put(key, value).ok()) {
+          results.RecordSuccess();
+        } else {
+          results.RecordFailure("Put failed for " + key);
+        }
       }
     });
   }
@@ -550,6 +583,8 @@ TEST_F(IntegrationTest, DataIntegrityUnderConcurrency) {
   for (auto& t : threads) {
     t.join();
   }
+
+  EXPECT_TRUE(results.AllSucceeded()) << "Write failures: " << results.FailureCount();
 
   // Verify all values are correct
   for (int t = 0; t < kNumThreads; ++t) {

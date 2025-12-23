@@ -1,5 +1,18 @@
 // Performance benchmarks for prestige Store
 // Uses Google Benchmark for accurate measurement and CI regression tracking
+//
+// Organization:
+// 1. MICROBENCHMARKS: CPU-bound operations (SHA-256, serialization, etc.)
+//    - No I/O, no database operations
+//    - Useful for measuring algorithm performance
+// 2. MACROBENCHMARKS: Store operations (Put, Get, Delete, etc.)
+//    - Full database operations with I/O
+//    - Useful for measuring end-to-end performance
+//
+// Benchmark hygiene:
+// - Pre-generate all test data outside timing loops
+// - Use state.PauseTiming()/ResumeTiming() for necessary setup
+// - Use fixed dataset sizes for reproducible results
 
 #include <benchmark/benchmark.h>
 
@@ -105,6 +118,10 @@ class StoreBenchmark : public benchmark::Fixture {
   std::unique_ptr<prestige::Store> store_;
   std::mt19937 gen_{std::random_device{}()};
 };
+
+// =============================================================================
+// PART 1: MICROBENCHMARKS - CPU-bound operations without I/O
+// =============================================================================
 
 // =============================================================================
 // Internal Utilities Benchmarks
@@ -297,18 +314,32 @@ static void BM_CosineSimilarity(benchmark::State& state) {
 BENCHMARK(BM_CosineSimilarity);
 
 // =============================================================================
+// PART 2: MACROBENCHMARKS - Store operations with I/O
+// =============================================================================
+
+// =============================================================================
 // Store Operation Benchmarks
 // =============================================================================
 
 BENCHMARK_DEFINE_F(StoreBenchmark, Put_UniqueValues)(benchmark::State& state) {
   OpenStore();
+
+  // Pre-generate all values outside timing loop
+  const size_t kNumValues = 10000;
+  std::vector<std::string> values;
+  values.reserve(kNumValues);
+  for (size_t i = 0; i < kNumValues; ++i) {
+    values.push_back(RandomString(state.range(0)));
+  }
+
   int64_t key_id = 0;
+  size_t value_idx = 0;
 
   for (auto _ : state) {
     std::string key = "key_" + std::to_string(key_id++);
-    std::string value = RandomString(state.range(0));
-    auto status = store_->Put(key, value);
+    auto status = store_->Put(key, values[value_idx]);
     benchmark::DoNotOptimize(status);
+    value_idx = (value_idx + 1) % kNumValues;
   }
   state.SetBytesProcessed(state.iterations() * state.range(0));
 }
@@ -330,19 +361,35 @@ BENCHMARK_REGISTER_F(StoreBenchmark, Put_DuplicateValues)->Range(64, 1 << 16);
 BENCHMARK_DEFINE_F(StoreBenchmark, Get_Existing)(benchmark::State& state) {
   OpenStore();
 
-  // Pre-populate
-  for (int i = 0; i < 1000; ++i) {
-    store_->Put("key_" + std::to_string(i), "value_" + std::to_string(i));
+  // Pre-generate keys for access pattern
+  const int kNumKeys = 1000;
+  const int kNumLookups = 10000;
+  std::vector<std::string> keys;
+  keys.reserve(kNumKeys);
+
+  // Pre-populate store
+  for (int i = 0; i < kNumKeys; ++i) {
+    std::string key = "key_" + std::to_string(i);
+    keys.push_back(key);
+    store_->Put(key, "value_" + std::to_string(i));
   }
 
-  std::uniform_int_distribution<> dis(0, 999);
+  // Pre-generate random lookup sequence
+  std::vector<int> lookup_indices;
+  lookup_indices.reserve(kNumLookups);
+  std::uniform_int_distribution<> dis(0, kNumKeys - 1);
+  for (int i = 0; i < kNumLookups; ++i) {
+    lookup_indices.push_back(dis(gen_));
+  }
+
   std::string value;
+  size_t lookup_idx = 0;
 
   for (auto _ : state) {
-    std::string key = "key_" + std::to_string(dis(gen_));
-    auto status = store_->Get(key, &value);
+    auto status = store_->Get(keys[lookup_indices[lookup_idx]], &value);
     benchmark::DoNotOptimize(status);
     benchmark::DoNotOptimize(value);
+    lookup_idx = (lookup_idx + 1) % kNumLookups;
   }
 }
 BENCHMARK_REGISTER_F(StoreBenchmark, Get_Existing);
@@ -388,28 +435,50 @@ BENCHMARK_REGISTER_F(StoreBenchmark, Delete_Existing);
 BENCHMARK_DEFINE_F(StoreBenchmark, MixedReadWrite)(benchmark::State& state) {
   OpenStore();
 
-  // Pre-populate
-  for (int i = 0; i < 1000; ++i) {
-    store_->Put("key_" + std::to_string(i), "value_" + std::to_string(i));
+  const int kNumKeys = 1000;
+  const int kNumOps = 10000;
+
+  // Pre-generate keys
+  std::vector<std::string> read_keys;
+  read_keys.reserve(kNumKeys);
+  for (int i = 0; i < kNumKeys; ++i) {
+    std::string key = "key_" + std::to_string(i);
+    read_keys.push_back(key);
+    store_->Put(key, "value_" + std::to_string(i));
   }
 
-  std::uniform_int_distribution<> key_dis(0, 999);
-  std::uniform_int_distribution<> op_dis(0, 9);  // 70% reads, 30% writes
+  // Pre-generate operation sequence (70% reads, 30% writes)
+  struct Op {
+    bool is_read;
+    int key_idx;  // For reads: index into read_keys; For writes: suffix for new key
+  };
+  std::vector<Op> ops;
+  ops.reserve(kNumOps);
+
+  std::uniform_int_distribution<> key_dis(0, kNumKeys - 1);
+  std::uniform_int_distribution<> op_dis(0, 9);
+  int write_key_id = kNumKeys;
+  for (int i = 0; i < kNumOps; ++i) {
+    Op op;
+    op.is_read = (op_dis(gen_) < 7);
+    op.key_idx = op.is_read ? key_dis(gen_) : write_key_id++;
+    ops.push_back(op);
+  }
+
   std::string value;
-  int64_t new_key_id = 1000;
+  size_t op_idx = 0;
 
   for (auto _ : state) {
-    if (op_dis(gen_) < 7) {
-      // Read
-      std::string key = "key_" + std::to_string(key_dis(gen_));
-      auto status = store_->Get(key, &value);
+    const Op& op = ops[op_idx];
+    if (op.is_read) {
+      auto status = store_->Get(read_keys[op.key_idx], &value);
       benchmark::DoNotOptimize(status);
     } else {
-      // Write
-      std::string key = "key_" + std::to_string(new_key_id++);
+      std::string key = "key_" + std::to_string(op.key_idx);
       auto status = store_->Put(key, "new_value");
       benchmark::DoNotOptimize(status);
     }
+    op_idx = (op_idx + 1) % kNumOps;
   }
 }
 BENCHMARK_REGISTER_F(StoreBenchmark, MixedReadWrite);
@@ -585,19 +654,35 @@ BENCHMARK_REGISTER_F(StoreBenchmark, SequentialPuts);
 
 BENCHMARK_DEFINE_F(StoreBenchmark, SequentialReads)(benchmark::State& state) {
   OpenStore();
-  // Pre-populate
-  for (int i = 0; i < 10000; ++i) {
-    store_->Put("read_key_" + std::to_string(i), "value");
+
+  const int kNumKeys = 10000;
+  const int kNumLookups = 10000;
+
+  // Pre-generate keys and populate store
+  std::vector<std::string> keys;
+  keys.reserve(kNumKeys);
+  for (int i = 0; i < kNumKeys; ++i) {
+    std::string key = "read_key_" + std::to_string(i);
+    keys.push_back(key);
+    store_->Put(key, "value");
   }
 
-  std::uniform_int_distribution<> dis(0, 9999);
+  // Pre-generate random lookup sequence
+  std::vector<int> lookup_indices;
+  lookup_indices.reserve(kNumLookups);
+  std::uniform_int_distribution<> dis(0, kNumKeys - 1);
+  for (int i = 0; i < kNumLookups; ++i) {
+    lookup_indices.push_back(dis(gen_));
+  }
+
   std::string value;
+  size_t lookup_idx = 0;
 
   for (auto _ : state) {
-    std::string key = "read_key_" + std::to_string(dis(gen_));
-    auto status = store_->Get(key, &value);
+    auto status = store_->Get(keys[lookup_indices[lookup_idx]], &value);
     benchmark::DoNotOptimize(status);
     benchmark::DoNotOptimize(value);
+    lookup_idx = (lookup_idx + 1) % kNumLookups;
   }
 }
 BENCHMARK_REGISTER_F(StoreBenchmark, SequentialReads);

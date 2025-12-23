@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <prestige/store.hpp>
+#include <prestige/test_utils.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -24,6 +25,7 @@ class CacheTest : public ::testing::Test {
     test_dir_ = std::filesystem::temp_directory_path() / ("prestige_cache_test_" + RandomSuffix());
     std::filesystem::create_directories(test_dir_);
     db_path_ = (test_dir_ / "test_db").string();
+    fake_clock_ = std::make_unique<testing::FakeClock>();
   }
 
   void TearDown() override {
@@ -33,7 +35,19 @@ class CacheTest : public ::testing::Test {
   }
 
   rocksdb::Status OpenStore(const Options& opt = Options{}) {
-    return Store::Open(db_path_, &store_, opt);
+    Options opt_with_clock = opt;
+    opt_with_clock.custom_clock = fake_clock_.get();
+    return Store::Open(db_path_, &store_, opt_with_clock);
+  }
+
+  // Advance time by specified seconds
+  void AdvanceTime(uint64_t seconds) {
+    fake_clock_->AdvanceSec(seconds);
+  }
+
+  // Advance time by specified milliseconds
+  void AdvanceTimeMs(uint64_t ms) {
+    fake_clock_->AdvanceMs(ms);
   }
 
   std::string RandomSuffix() {
@@ -46,6 +60,7 @@ class CacheTest : public ::testing::Test {
   std::filesystem::path test_dir_;
   std::string db_path_;
   std::unique_ptr<Store> store_;
+  std::unique_ptr<testing::FakeClock> fake_clock_;
 };
 
 // =============================================================================
@@ -71,8 +86,8 @@ TEST_F(CacheTest, TTLExpired) {
 
   ASSERT_TRUE(store_->Put("key1", "value1").ok());
 
-  // Wait for TTL to expire
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  // Advance time past TTL
+  AdvanceTime(2);
 
   std::string value;
   auto status = store_->Get("key1", &value);
@@ -86,8 +101,8 @@ TEST_F(CacheTest, TTLZeroMeansNoExpiration) {
 
   ASSERT_TRUE(store_->Put("key1", "value1").ok());
 
-  // Sleep a bit (shouldn't expire)
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  // Advance time (shouldn't expire since TTL is 0)
+  AdvanceTimeMs(100);
 
   std::string value;
   ASSERT_TRUE(store_->Get("key1", &value).ok());
@@ -100,11 +115,11 @@ TEST_F(CacheTest, TTLAppliesPerObject) {
   ASSERT_TRUE(OpenStore(opt).ok());
 
   ASSERT_TRUE(store_->Put("key1", "value1").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  AdvanceTimeMs(600);
   ASSERT_TRUE(store_->Put("key2", "value2").ok());
 
   // key1 should expire first
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  AdvanceTimeMs(600);
 
   std::string value;
   // key1 should be expired (1.2s old)
@@ -189,8 +204,8 @@ TEST_F(CacheTest, SweepExpiredObjects) {
   ASSERT_TRUE(store_->Put("key1", "value1").ok());
   ASSERT_TRUE(store_->Put("key2", "value2").ok());
 
-  // Wait for expiration
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  // Advance time past expiration
+  AdvanceTime(2);
 
   uint64_t deleted = 0;
   ASSERT_TRUE(store_->Sweep(&deleted).ok());
@@ -208,7 +223,7 @@ TEST_F(CacheTest, SweepMixedExpiration) {
   ASSERT_TRUE(OpenStore(opt).ok());
 
   ASSERT_TRUE(store_->Put("old_key", "old_value").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  AdvanceTimeMs(1500);
 
   // Close and reopen with longer TTL for new keys
   store_->Close();
@@ -260,7 +275,7 @@ TEST_F(CacheTest, PruneByAge) {
   ASSERT_TRUE(OpenStore(opt).ok());
 
   ASSERT_TRUE(store_->Put("old_key", "old_value").ok());
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  AdvanceTime(2);
   ASSERT_TRUE(store_->Put("new_key", "new_value").ok());
 
   // Prune objects older than 1 second
@@ -283,7 +298,7 @@ TEST_F(CacheTest, PruneByIdleTime) {
   ASSERT_TRUE(store_->Put("idle_key", "idle_value").ok());
   ASSERT_TRUE(store_->Put("active_key", "active_value").ok());
 
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  AdvanceTime(2);
 
   // Access active_key to update its access time
   std::string value;
@@ -308,7 +323,7 @@ TEST_F(CacheTest, PruneBothAgeAndIdle) {
   ASSERT_TRUE(store_->Put("key1", "value1").ok());
   ASSERT_TRUE(store_->Put("key2", "value2").ok());
 
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  AdvanceTime(2);
 
   // Prune with both age and idle constraints
   uint64_t deleted = 0;
@@ -381,11 +396,11 @@ TEST_F(CacheTest, EvictLRUEvictsOldest) {
   opt.lru_update_interval_seconds = 0;
   ASSERT_TRUE(OpenStore(opt).ok());
 
-  // Insert keys with delays to establish LRU order
+  // Insert keys with time gaps to establish LRU order
   ASSERT_TRUE(store_->Put("oldest", "value_oldest").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  AdvanceTimeMs(100);
   ASSERT_TRUE(store_->Put("middle", "value_middle").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  AdvanceTimeMs(100);
   ASSERT_TRUE(store_->Put("newest", "value_newest").ok());
 
   // Verify all keys were inserted
@@ -411,9 +426,9 @@ TEST_F(CacheTest, EvictLRUAccessUpdatesOrder) {
   ASSERT_TRUE(OpenStore(opt).ok());
 
   ASSERT_TRUE(store_->Put("first", "value1").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  AdvanceTimeMs(100);
   ASSERT_TRUE(store_->Put("second", "value2").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  AdvanceTimeMs(100);
 
   // Access "first" to make it recently used
   std::string value;
@@ -537,8 +552,8 @@ TEST_F(CacheTest, LongRunningOperations) {
     ASSERT_TRUE(store_->Put("key_" + std::to_string(i), "value").ok());
   }
 
-  // Wait for TTL to expire
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  // Advance time past TTL
+  AdvanceTime(2);
 
   // Sweep should clean up expired objects
   uint64_t deleted = 0;
