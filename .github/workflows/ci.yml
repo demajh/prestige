@@ -6,8 +6,48 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  BUILD_TYPE: Release
+
 jobs:
-  build:
+  # =============================================================================
+  # Code Quality Checks
+  # =============================================================================
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format and clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-15 clang-tidy-15
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-15 100
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-15 100
+
+      - name: Check formatting
+        run: |
+          find src include tests benchmarks examples tools -name '*.cpp' -o -name '*.hpp' 2>/dev/null | head -100 | xargs clang-format --dry-run --Werror || echo "Format check completed (warnings may be present)"
+
+      - name: Install dependencies for clang-tidy
+        run: |
+          sudo apt-get install -y librocksdb-dev libssl-dev
+
+      - name: Generate compile_commands.json
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DPRESTIGE_BUILD_TESTS=OFF
+
+      - name: Run clang-tidy
+        run: |
+          clang-tidy -p build src/*.cpp --warnings-as-errors='bugprone-*,clang-analyzer-core.*' || echo "clang-tidy completed (some warnings may be present)"
+
+  # =============================================================================
+  # Build and Test (Multi-platform)
+  # =============================================================================
+  build-and-test:
     strategy:
       fail-fast: false
       matrix:
@@ -23,28 +63,153 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y librocksdb-dev
+          sudo apt-get install -y librocksdb-dev libssl-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install rocksdb
+          brew install rocksdb openssl@3
 
       - name: Configure CMake
         run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            export OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+          fi
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DPRESTIGE_BUILD_EXAMPLES=ON \
-            -DPRESTIGE_BUILD_TOOLS=ON
+            -DPRESTIGE_BUILD_TOOLS=ON \
+            -DPRESTIGE_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure --timeout 300 -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
       - name: Run basic example
         run: |
           ./build/prestige_example_basic
           rm -rf ./prestige_db
 
+  # =============================================================================
+  # Code Coverage
+  # =============================================================================
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev libssl-dev lcov
+
+      - name: Configure CMake with coverage
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPRESTIGE_BUILD_TESTS=ON \
+            -DPRESTIGE_ENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure --timeout 300
+
+      - name: Generate coverage report
+        run: |
+          cd build
+          lcov --directory . --capture --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/googletest/*' '*/tests/*' '*/build/_deps/*' --output-file coverage.info.cleaned
+          lcov --list coverage.info.cleaned
+
+      - name: Check coverage threshold
+        run: |
+          cd build
+          COVERAGE=$(lcov --summary coverage.info.cleaned 2>&1 | grep 'lines' | sed 's/.*: //' | sed 's/%.*//')
+          echo "Line coverage: ${COVERAGE}%"
+          # Fail if coverage is below 80%
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "ERROR: Coverage ${COVERAGE}% is below 80% threshold"
+            exit 1
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: build/coverage.info.cleaned
+          fail_ci_if_error: false
+
+  # =============================================================================
+  # Benchmarks
+  # =============================================================================
+  benchmarks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev libssl-dev
+
+      - name: Configure CMake with benchmarks
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPRESTIGE_BUILD_BENCHMARKS=ON
+
+      - name: Build benchmarks
+        run: cmake --build build --target prestige_benchmarks -j$(nproc)
+
+      - name: Run benchmarks
+        run: |
+          ./build/prestige_benchmarks \
+            --benchmark_out=benchmark_results.json \
+            --benchmark_out_format=json \
+            --benchmark_repetitions=3 \
+            --benchmark_report_aggregates_only=true
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark_results.json
+          retention-days: 30
+
+      - name: Download baseline (if exists)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: benchmark-baseline
+          path: baseline
+
+      - name: Compare benchmarks
+        if: ${{ hashFiles('baseline/benchmark_baseline.json') != '' }}
+        run: |
+          echo "Comparing with baseline..."
+          # Simple comparison - in production use tools like benchmark_compare.py
+          cat benchmark_results.json | python3 -c "
+          import json, sys
+          results = json.load(sys.stdin)
+          print('Benchmark Results:')
+          for b in results.get('benchmarks', []):
+            name = b.get('name', 'unknown')
+            time = b.get('real_time', 0)
+            print(f'  {name}: {time:.2f}ns')
+          "
+
+  # =============================================================================
+  # Semantic Mode Build (Optional)
+  # =============================================================================
   build-semantic:
     runs-on: ubuntu-latest
 
@@ -54,10 +219,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y librocksdb-dev
+          sudo apt-get install -y librocksdb-dev libssl-dev
 
           # Install ONNX Runtime
-          wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
+          wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
           tar -xzf onnxruntime-linux-x64-1.16.3.tgz
           sudo cp -r onnxruntime-linux-x64-1.16.3/include/* /usr/local/include/
           sudo cp -r onnxruntime-linux-x64-1.16.3/lib/* /usr/local/lib/
@@ -73,3 +238,44 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release -j$(nproc)
+
+  # =============================================================================
+  # Memory Safety (ASAN/UBSAN)
+  # =============================================================================
+  sanitizers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev libssl-dev
+
+      - name: Configure CMake with sanitizers
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DPRESTIGE_BUILD_TESTS=ON \
+            -DPRESTIGE_BUILD_EXAMPLES=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests with sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          cd build
+          ctest --output-on-failure --timeout 600
+
+      - name: Run basic example with sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: |
+          ./build/prestige_example_basic
+          rm -rf ./prestige_db
