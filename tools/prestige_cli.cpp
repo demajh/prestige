@@ -10,7 +10,11 @@ static void usage(const char* argv0) {
       << "  " << argv0 << " <db_path> get <key>\n"
       << "  " << argv0 << " <db_path> del <key>\n"
       << "  " << argv0 << " <db_path> count\n"
-      << "  " << argv0 << " <db_path> keys [prefix] [limit]\n";
+      << "  " << argv0 << " <db_path> keys [prefix] [limit]\n"
+      << "  " << argv0 << " <db_path> sweep\n"
+      << "  " << argv0 << " <db_path> prune <max_age_s> <max_idle_s>\n"
+      << "  " << argv0 << " <db_path> evict <target_bytes>\n"
+      << "  " << argv0 << " <db_path> health\n";
 }
 
 int main(int argc, char** argv) {
@@ -99,6 +103,68 @@ int main(int argc, char** argv) {
     for (const auto& k : out) {
       std::cout << k << "\n";
     }
+    return 0;
+  } else if (cmd == "sweep") {
+    if (argc != 3) { usage(argv[0]); return 2; }
+    uint64_t deleted = 0;
+    s = db->Sweep(&deleted);
+    if (!s.ok()) {
+      std::cerr << "Sweep failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    std::cout << "deleted=" << deleted << "\n";
+    return 0;
+  } else if (cmd == "prune") {
+    if (argc != 5) { usage(argv[0]); return 2; }
+    uint64_t max_age_s = 0, max_idle_s = 0;
+    try {
+      max_age_s = std::stoull(argv[3]);
+      max_idle_s = std::stoull(argv[4]);
+    } catch (...) {
+      std::cerr << "Invalid arguments\n";
+      return 2;
+    }
+    uint64_t deleted = 0;
+    s = db->Prune(max_age_s, max_idle_s, &deleted);
+    if (!s.ok()) {
+      std::cerr << "Prune failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    std::cout << "deleted=" << deleted << "\n";
+    return 0;
+  } else if (cmd == "evict") {
+    if (argc != 4) { usage(argv[0]); return 2; }
+    uint64_t target_bytes = 0;
+    try {
+      target_bytes = std::stoull(argv[3]);
+    } catch (...) {
+      std::cerr << "Invalid target_bytes\n";
+      return 2;
+    }
+    uint64_t evicted = 0;
+    s = db->EvictLRU(target_bytes, &evicted);
+    if (!s.ok()) {
+      std::cerr << "Evict failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    std::cout << "evicted=" << evicted << "\n";
+    return 0;
+  } else if (cmd == "health") {
+    if (argc != 3) { usage(argv[0]); return 2; }
+    prestige::HealthStats stats;
+    s = db->GetHealth(&stats);
+    if (!s.ok()) {
+      std::cerr << "Health failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    std::cout << "total_keys=" << stats.total_keys << "\n"
+              << "total_objects=" << stats.total_objects << "\n"
+              << "total_bytes=" << stats.total_bytes << "\n"
+              << "expired_objects=" << stats.expired_objects << "\n"
+              << "orphaned_objects=" << stats.orphaned_objects << "\n"
+              << "oldest_object_age_s=" << stats.oldest_object_age_s << "\n"
+              << "newest_access_age_s=" << stats.newest_access_age_s << "\n"
+              << "dedup_ratio=" << stats.dedup_ratio << "\n";
     return 0;
   } else {
     usage(argv[0]);

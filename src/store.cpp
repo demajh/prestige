@@ -25,6 +25,7 @@ constexpr const char* kObjectStoreCF = "prestige_object_store";
 constexpr const char* kDedupIndexCF  = "prestige_dedup_index";
 constexpr const char* kRefcountCF    = "prestige_refcount";
 constexpr const char* kObjectMetaCF  = "prestige_object_meta";
+constexpr const char* kLRUIndexCF    = "prestige_lru_index";
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 constexpr const char* kEmbeddingsCF  = "prestige_embeddings";
 #endif
@@ -96,6 +97,16 @@ rocksdb::ColumnFamilyOptions MakeCFOptions(const std::shared_ptr<rocksdb::Cache>
 
 }  // namespace
 
+// Forward declaration for cache management methods
+static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* txn,
+                                                        rocksdb::ColumnFamilyHandle* objects_cf,
+                                                        rocksdb::ColumnFamilyHandle* dedup_cf,
+                                                        rocksdb::ColumnFamilyHandle* refcount_cf,
+                                                        rocksdb::ColumnFamilyHandle* meta_cf,
+                                                        rocksdb::ColumnFamilyHandle* lru_cf,
+                                                        std::atomic<uint64_t>* total_store_bytes,
+                                                        const std::string& obj_id);
+
 Store::Store(const Options& opt) : opt_(opt) {}
 
 Store::~Store() { Close(); }
@@ -152,6 +163,7 @@ rocksdb::Status Store::Open(const std::string& db_path,
   cfs.emplace_back(kDedupIndexCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kRefcountCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kObjectMetaCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
+  cfs.emplace_back(kLRUIndexCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Add embeddings CF for semantic mode
@@ -178,11 +190,12 @@ rocksdb::Status Store::Open(const std::string& db_path,
   store->dedup_cf_   = store->handles_[3];
   store->refcount_cf_= store->handles_[4];
   store->meta_cf_    = store->handles_[5];
+  store->lru_cf_     = store->handles_[6];
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Initialize semantic dedup components
   if (opt.dedup_mode == DedupMode::kSemantic) {
-    store->embeddings_cf_ = store->handles_[6];
+    store->embeddings_cf_ = store->handles_[7];
 
     // Create embedder
     std::string embedder_error;
@@ -276,6 +289,24 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
                 prestige::internal::NowMicros() - map_start_us);
   if (!s.ok()) return finish(s);
 
+  // Check TTL if enabled
+  if (opt_.default_ttl_seconds > 0) {
+    std::string meta_raw;
+    rocksdb::Status ms = db_->Get(ro, meta_cf_, rocksdb::Slice(obj_id), &meta_raw);
+    if (ms.ok()) {
+      prestige::internal::ObjectMeta meta;
+      if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) && !meta.IsLegacy()) {
+        uint64_t now_us = prestige::internal::WallClockMicros();
+        uint64_t age_us = now_us - meta.created_at_us;
+        uint64_t ttl_us = opt_.default_ttl_seconds * 1000000ULL;
+        if (age_us > ttl_us) {
+          EmitCounter(opt_, "prestige.get.expired_total", 1);
+          return finish(rocksdb::Status::NotFound("Object expired"));
+        }
+      }
+    }
+  }
+
   // 2) object_id -> value_bytes
   const uint64_t obj_start_us = prestige::internal::NowMicros();
   rocksdb::Status s2 = db_->Get(ro, objects_cf_, rocksdb::Slice(obj_id), value_bytes_out);
@@ -285,6 +316,33 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
   if (s2.ok()) {
     EmitHistogram(opt_, "prestige.get.value_bytes",
                   static_cast<uint64_t>(value_bytes_out->size()));
+
+    // Update last_accessed_us for LRU tracking (if enabled)
+    if (opt_.track_access_time) {
+      std::string meta_raw;
+      rocksdb::Status ms = db_->Get(ro, meta_cf_, rocksdb::Slice(obj_id), &meta_raw);
+      if (ms.ok()) {
+        prestige::internal::ObjectMeta meta;
+        if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) && !meta.IsLegacy()) {
+          uint64_t old_access_us = meta.last_accessed_us;
+          uint64_t now_us = prestige::internal::WallClockMicros();
+          meta.last_accessed_us = now_us;
+
+          // Update metadata and LRU index (best-effort, don't fail the Get)
+          rocksdb::WriteBatch batch;
+          batch.Put(meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(meta.Serialize()));
+
+          // Delete old LRU entry and add new one
+          std::string old_lru_key = prestige::internal::MakeLRUKey(old_access_us, obj_id);
+          std::string new_lru_key = prestige::internal::MakeLRUKey(now_us, obj_id);
+          batch.Delete(lru_cf_, rocksdb::Slice(old_lru_key));
+          batch.Put(lru_cf_, rocksdb::Slice(new_lru_key), rocksdb::Slice());
+
+          rocksdb::WriteOptions wo;
+          (void)db_->Write(wo, &batch);
+        }
+      }
+    }
   }
 
   return finish(s2);
@@ -429,6 +487,314 @@ void Store::EmitCacheMetrics() {
   }
 }
 
+uint64_t Store::GetTotalStoreBytes() const {
+  return total_store_bytes_.load();
+}
+
+rocksdb::Status Store::Sweep(uint64_t* deleted_count) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!deleted_count) return rocksdb::Status::InvalidArgument("deleted_count is null");
+
+  *deleted_count = 0;
+  uint64_t now_us = prestige::internal::WallClockMicros();
+  uint64_t ttl_us = opt_.default_ttl_seconds * 1000000ULL;
+
+  const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
+  rocksdb::ReadOptions ro;
+  ro.snapshot = snapshot;
+
+  std::vector<std::string> to_delete;
+
+  // Scan all objects
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, refcount_cf_));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      std::string obj_id(it->key().data(), it->key().size());
+
+      // Check refcount
+      uint64_t refcount = 0;
+      std::string_view v(it->value().data(), it->value().size());
+      if (!prestige::internal::DecodeU64LE(v, &refcount)) {
+        continue;  // Skip corrupted entries
+      }
+
+      // Orphaned object (refcount = 0)
+      if (refcount == 0) {
+        to_delete.push_back(obj_id);
+        continue;
+      }
+
+      // Check TTL if enabled
+      if (opt_.default_ttl_seconds > 0) {
+        std::string meta_raw;
+        rocksdb::Status ms = db_->Get(ro, meta_cf_, rocksdb::Slice(obj_id), &meta_raw);
+        if (ms.ok()) {
+          prestige::internal::ObjectMeta meta;
+          if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) &&
+              !meta.IsLegacy()) {
+            if (now_us - meta.created_at_us > ttl_us) {
+              to_delete.push_back(obj_id);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  db_->ReleaseSnapshot(snapshot);
+
+  // Delete collected objects using transactions
+  rocksdb::WriteOptions wo;
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+
+  for (const auto& obj_id : to_delete) {
+    std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+    if (!txn) continue;
+
+    rocksdb::Status s = DeleteObjectIfUnreferencedLocked(
+        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+        &total_store_bytes_, obj_id);
+
+    if (s.ok()) {
+      s = txn->Commit();
+      if (s.ok()) {
+        (*deleted_count)++;
+      }
+    }
+  }
+
+  EmitCounter(opt_, "prestige.sweep.deleted_total", *deleted_count);
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::Prune(uint64_t max_age_seconds,
+                             uint64_t max_idle_seconds,
+                             uint64_t* deleted_count) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!deleted_count) return rocksdb::Status::InvalidArgument("deleted_count is null");
+
+  *deleted_count = 0;
+  uint64_t now_us = prestige::internal::WallClockMicros();
+  uint64_t max_age_us = max_age_seconds * 1000000ULL;
+  uint64_t max_idle_us = max_idle_seconds * 1000000ULL;
+
+  if (max_age_seconds == 0 && max_idle_seconds == 0) {
+    return rocksdb::Status::OK();  // Nothing to prune
+  }
+
+  const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
+  rocksdb::ReadOptions ro;
+  ro.snapshot = snapshot;
+
+  std::vector<std::string> to_delete;
+
+  // Scan all objects
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, refcount_cf_));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      std::string obj_id(it->key().data(), it->key().size());
+
+      std::string meta_raw;
+      rocksdb::Status ms = db_->Get(ro, meta_cf_, rocksdb::Slice(obj_id), &meta_raw);
+      if (!ms.ok()) continue;
+
+      prestige::internal::ObjectMeta meta;
+      if (!prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) ||
+          meta.IsLegacy()) {
+        continue;
+      }
+
+      bool should_delete = false;
+
+      // Check age
+      if (max_age_seconds > 0 && now_us - meta.created_at_us > max_age_us) {
+        should_delete = true;
+      }
+
+      // Check idle time
+      if (max_idle_seconds > 0 && now_us - meta.last_accessed_us > max_idle_us) {
+        should_delete = true;
+      }
+
+      if (should_delete) {
+        to_delete.push_back(obj_id);
+      }
+    }
+  }
+
+  db_->ReleaseSnapshot(snapshot);
+
+  // Delete collected objects
+  rocksdb::WriteOptions wo;
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+
+  for (const auto& obj_id : to_delete) {
+    std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+    if (!txn) continue;
+
+    rocksdb::Status s = DeleteObjectIfUnreferencedLocked(
+        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+        &total_store_bytes_, obj_id);
+
+    if (s.ok()) {
+      s = txn->Commit();
+      if (s.ok()) {
+        (*deleted_count)++;
+      }
+    }
+  }
+
+  EmitCounter(opt_, "prestige.prune.deleted_total", *deleted_count);
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::EvictLRU(uint64_t target_bytes, uint64_t* evicted_count) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!evicted_count) return rocksdb::Status::InvalidArgument("evicted_count is null");
+
+  *evicted_count = 0;
+
+  // Check if eviction needed
+  uint64_t current_bytes = total_store_bytes_.load();
+  if (current_bytes <= target_bytes) {
+    return rocksdb::Status::OK();  // Already under target
+  }
+
+  rocksdb::ReadOptions ro;
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, lru_cf_));
+
+  rocksdb::WriteOptions wo;
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+
+  // Iterate from oldest (smallest timestamp) to newest
+  for (it->SeekToFirst();
+       it->Valid() && total_store_bytes_.load() > target_bytes;
+       it->Next()) {
+
+    uint64_t timestamp_us;
+    std::string obj_id;
+    std::string_view key_view(it->key().data(), it->key().size());
+    if (!prestige::internal::ParseLRUKey(key_view, &timestamp_us, &obj_id)) {
+      continue;
+    }
+
+    // Check refcount - only evict if refcount > 0
+    std::string refcount_raw;
+    rocksdb::Status rs = db_->Get(ro, refcount_cf_, rocksdb::Slice(obj_id), &refcount_raw);
+    if (!rs.ok()) continue;
+
+    uint64_t refcount = 0;
+    if (!prestige::internal::DecodeU64LE(refcount_raw, &refcount) || refcount == 0) {
+      continue;  // Orphaned objects should be cleaned by Sweep
+    }
+
+    // Delete this object
+    std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+    if (!txn) continue;
+
+    rocksdb::Status s = DeleteObjectIfUnreferencedLocked(
+        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+        &total_store_bytes_, obj_id);
+
+    if (s.ok()) {
+      s = txn->Commit();
+      if (s.ok()) {
+        (*evicted_count)++;
+      }
+    }
+  }
+
+  EmitCounter(opt_, "prestige.evict.count", *evicted_count);
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::GetHealth(HealthStats* stats) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!stats) return rocksdb::Status::InvalidArgument("stats is null");
+
+  *stats = HealthStats{};
+
+  const rocksdb::Snapshot* snapshot = db_->GetSnapshot();
+  rocksdb::ReadOptions ro;
+  ro.snapshot = snapshot;
+
+  uint64_t now_us = prestige::internal::WallClockMicros();
+  uint64_t ttl_us = opt_.default_ttl_seconds * 1000000ULL;
+
+  uint64_t oldest_created = UINT64_MAX;
+  uint64_t newest_accessed = 0;
+
+  // Count keys
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, user_kv_cf_));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      stats->total_keys++;
+    }
+  }
+
+  // Count objects and gather stats
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, refcount_cf_));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      std::string obj_id(it->key().data(), it->key().size());
+
+      uint64_t refcount = 0;
+      std::string_view v(it->value().data(), it->value().size());
+      if (!prestige::internal::DecodeU64LE(v, &refcount)) {
+        continue;
+      }
+
+      if (refcount == 0) {
+        stats->orphaned_objects++;
+      }
+
+      stats->total_objects++;
+
+      // Get metadata
+      std::string meta_raw;
+      if (db_->Get(ro, meta_cf_, rocksdb::Slice(obj_id), &meta_raw).ok()) {
+        prestige::internal::ObjectMeta meta;
+        if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta)) {
+          stats->total_bytes += meta.size_bytes;
+
+          if (!meta.IsLegacy()) {
+            if (meta.created_at_us < oldest_created) {
+              oldest_created = meta.created_at_us;
+            }
+            if (meta.last_accessed_us > newest_accessed) {
+              newest_accessed = meta.last_accessed_us;
+            }
+
+            // Check for expired
+            if (ttl_us > 0 && now_us - meta.created_at_us > ttl_us) {
+              stats->expired_objects++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  db_->ReleaseSnapshot(snapshot);
+
+  // Calculate derived stats
+  if (oldest_created != UINT64_MAX) {
+    stats->oldest_object_age_s = (now_us - oldest_created) / 1000000ULL;
+  }
+  if (newest_accessed > 0) {
+    stats->newest_access_age_s = (now_us - newest_accessed) / 1000000ULL;
+  }
+  if (stats->total_objects > 0) {
+    stats->dedup_ratio = static_cast<double>(stats->total_keys) /
+                         static_cast<double>(stats->total_objects);
+  }
+
+  return rocksdb::Status::OK();
+}
+
 void Store::Close() {
   if (!db_) return;
 
@@ -448,7 +814,7 @@ void Store::Close() {
   handles_.clear();
   delete db_;
   db_ = nullptr;
-  user_kv_cf_ = objects_cf_ = dedup_cf_ = refcount_cf_ = meta_cf_ = nullptr;
+  user_kv_cf_ = objects_cf_ = dedup_cf_ = refcount_cf_ = meta_cf_ = lru_cf_ = nullptr;
 }
 
 static rocksdb::Status AdjustRefcountLocked(rocksdb::Transaction* txn,
@@ -494,14 +860,16 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
                                                         rocksdb::ColumnFamilyHandle* dedup_cf,
                                                         rocksdb::ColumnFamilyHandle* refcount_cf,
                                                         rocksdb::ColumnFamilyHandle* meta_cf,
+                                                        rocksdb::ColumnFamilyHandle* lru_cf,
+                                                        std::atomic<uint64_t>* total_store_bytes,
                                                         const std::string& obj_id) {
   if (!txn) return rocksdb::Status::InvalidArgument("txn is null");
 
   rocksdb::ReadOptions ro;
 
-  // Lookup digest via meta (locks meta)
-  std::string digest_key;
-  rocksdb::Status s = txn->GetForUpdate(ro, meta_cf, rocksdb::Slice(obj_id), &digest_key);
+  // Lookup metadata (locks meta)
+  std::string meta_raw;
+  rocksdb::Status s = txn->GetForUpdate(ro, meta_cf, rocksdb::Slice(obj_id), &meta_raw);
   if (s.IsNotFound()) {
     // Best-effort cleanup of object/refcount, but cannot reliably cleanup dedup index.
     (void)txn->Delete(objects_cf, rocksdb::Slice(obj_id));
@@ -510,16 +878,28 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
   }
   if (!s.ok()) return s;
 
+  // Parse metadata to get digest_key and LRU info
+  prestige::internal::ObjectMeta meta;
+  if (!prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta)) {
+    return rocksdb::Status::Corruption("Failed to parse object metadata");
+  }
+
   // Only delete dedup mapping if it still points to this obj_id
   std::string mapped_id;
-  s = txn->GetForUpdate(ro, dedup_cf, rocksdb::Slice(digest_key), &mapped_id);
+  s = txn->GetForUpdate(ro, dedup_cf, rocksdb::Slice(meta.digest_key), &mapped_id);
   if (s.ok()) {
     if (mapped_id == obj_id) {
-      s = txn->Delete(dedup_cf, rocksdb::Slice(digest_key));
+      s = txn->Delete(dedup_cf, rocksdb::Slice(meta.digest_key));
       if (!s.ok()) return s;
     }
   } else if (!s.IsNotFound()) {
     return s;
+  }
+
+  // Delete LRU index entry
+  if (lru_cf && !meta.IsLegacy()) {
+    std::string lru_key = prestige::internal::MakeLRUKey(meta.last_accessed_us, obj_id);
+    (void)txn->Delete(lru_cf, rocksdb::Slice(lru_key));
   }
 
   // Remove object bytes + meta + refcount
@@ -531,6 +911,16 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
 
   s = txn->Delete(refcount_cf, rocksdb::Slice(obj_id));
   if (!s.ok()) return s;
+
+  // Update total store size
+  if (total_store_bytes && meta.size_bytes > 0) {
+    uint64_t old_val = total_store_bytes->load();
+    if (old_val >= meta.size_bytes) {
+      total_store_bytes->fetch_sub(meta.size_bytes);
+    } else {
+      total_store_bytes->store(0);
+    }
+  }
 
   return rocksdb::Status::OK();
 }
@@ -646,13 +1036,28 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
         auto new_id = prestige::internal::RandomObjectId128();
         obj_id = prestige::internal::ToBytes(new_id.data(), new_id.size());
 
-        // Create: object bytes, meta, digest->obj_id, refcount initialized to 0
+        // Create: object bytes
         s = txn->Put(objects_cf_, rocksdb::Slice(obj_id),
                      rocksdb::Slice(value_bytes.data(), value_bytes.size()));
         if (!s.ok()) return finish(s);
         ++batch_writes;
 
-        s = txn->Put(meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(digest_key));
+        // Create full ObjectMeta with timestamps
+        uint64_t now_us = prestige::internal::WallClockMicros();
+        prestige::internal::ObjectMeta meta;
+        meta.digest_key = digest_key;
+        meta.created_at_us = now_us;
+        meta.last_accessed_us = now_us;
+        meta.size_bytes = value_bytes.size();
+
+        s = txn->Put(meta_cf_, rocksdb::Slice(obj_id),
+                     rocksdb::Slice(meta.Serialize()));
+        if (!s.ok()) return finish(s);
+        ++batch_writes;
+
+        // Add to LRU index
+        std::string lru_key = prestige::internal::MakeLRUKey(now_us, obj_id);
+        s = txn->Put(lru_cf_, rocksdb::Slice(lru_key), rocksdb::Slice());
         if (!s.ok()) return finish(s);
         ++batch_writes;
 
@@ -664,6 +1069,9 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
                      rocksdb::Slice(prestige::internal::EncodeU64LE(0)));
         if (!s.ok()) return finish(s);
         ++batch_writes;
+
+        // Update total store size
+        total_store_bytes_.fetch_add(value_bytes.size());
 
       } else if (!s.ok()) {
         if (prestige::internal::IsRetryableTxnStatus(s)) {
@@ -718,9 +1126,10 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
 
       if (opt_.enable_gc && old_cnt == 0) {
         s = DeleteObjectIfUnreferencedLocked(
-            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, old_obj_id);
+            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+            &total_store_bytes_, old_obj_id);
         if (!s.ok()) return finish(s);
-        batch_writes += 4;  // delete from objects, dedup, refcount, meta
+        batch_writes += 5;  // delete from objects, dedup, refcount, meta, lru
 
         EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
         SpanEvent(span.get(), "gc.delete_object");
@@ -840,13 +1249,15 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
         batch_writes += 3;  // embeddings, objects, refcount deletes
       } else {
         s = DeleteObjectIfUnreferencedLocked(
-            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, obj_id);
-        batch_writes += 4;  // objects, dedup, refcount, meta deletes
+            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+            &total_store_bytes_, obj_id);
+        batch_writes += 5;  // objects, dedup, refcount, meta, lru deletes
       }
 #else
       s = DeleteObjectIfUnreferencedLocked(
-          txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, obj_id);
-      batch_writes += 4;  // objects, dedup, refcount, meta deletes
+          txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+          &total_store_bytes_, obj_id);
+      batch_writes += 5;  // objects, dedup, refcount, meta, lru deletes
 #endif
       if (!s.ok()) return finish(s);
 

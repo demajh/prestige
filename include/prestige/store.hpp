@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -93,6 +94,27 @@ struct Options {
   // GC behavior
   bool enable_gc = true;
 
+  // ---------------------------------------------------------------------------
+  // Cache behavior settings (TTL and LRU eviction)
+  // ---------------------------------------------------------------------------
+
+  // Default TTL for objects in seconds (0 = no expiration).
+  // Objects older than this will return NotFound on Get.
+  uint64_t default_ttl_seconds = 0;
+
+  // Maximum store size in bytes (0 = unlimited).
+  // When exceeded, LRU eviction can be triggered via EvictLRU().
+  uint64_t max_store_bytes = 0;
+
+  // Target store size ratio for eviction (0.0-1.0).
+  // When evicting, remove objects until this ratio of max_store_bytes is reached.
+  // E.g., 0.8 means evict until store is at 80% of max_store_bytes.
+  double eviction_target_ratio = 0.8;
+
+  // Enable tracking of last access time (required for LRU eviction).
+  // Has slight write overhead on every Get().
+  bool track_access_time = true;
+
   // Observability hooks (optional)
   //
   // If set, Store operations will emit a small number of counters/histograms
@@ -141,6 +163,21 @@ struct Options {
   int faiss_nprobe = 10;          // Clusters to search at query time
   int faiss_pq_m = 48;            // PQ sub-quantizers (must divide 384)
   int faiss_pq_nbits = 8;         // Bits per sub-quantizer
+};
+
+/**
+ * Health statistics for the store.
+ * Returned by Store::GetHealth().
+ */
+struct HealthStats {
+  uint64_t total_keys = 0;          // Number of user keys
+  uint64_t total_objects = 0;       // Number of unique deduplicated objects
+  uint64_t total_bytes = 0;         // Total size of all objects in bytes
+  uint64_t expired_objects = 0;     // Objects past TTL (not yet swept)
+  uint64_t orphaned_objects = 0;    // Objects with refcount=0 (not yet GC'd)
+  uint64_t oldest_object_age_s = 0; // Age of oldest object in seconds
+  uint64_t newest_access_age_s = 0; // Time since most recent access in seconds
+  double dedup_ratio = 0.0;         // Ratio of keys to objects (higher = more dedup)
 };
 
 /**
@@ -205,6 +242,49 @@ class Store {
    */
   void EmitCacheMetrics();
 
+  // ---------------------------------------------------------------------------
+  // Cache management methods
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Sweep: Full scan to find and delete expired and orphaned objects.
+   * - Deletes objects past TTL (if default_ttl_seconds > 0)
+   * - Deletes objects with refcount=0 (orphaned)
+   * @param deleted_count Output: number of objects deleted
+   * @return OK on success
+   */
+  rocksdb::Status Sweep(uint64_t* deleted_count);
+
+  /**
+   * Prune: Selective deletion by age and/or idle time.
+   * @param max_age_seconds Delete objects older than this (0 = no age limit)
+   * @param max_idle_seconds Delete objects not accessed for this long (0 = no idle limit)
+   * @param deleted_count Output: number of objects deleted
+   * @return OK on success
+   */
+  rocksdb::Status Prune(uint64_t max_age_seconds,
+                        uint64_t max_idle_seconds,
+                        uint64_t* deleted_count);
+
+  /**
+   * EvictLRU: Evict least recently used objects until target size is reached.
+   * @param target_bytes Evict until store size is at or below this
+   * @param evicted_count Output: number of objects evicted
+   * @return OK on success
+   */
+  rocksdb::Status EvictLRU(uint64_t target_bytes, uint64_t* evicted_count);
+
+  /**
+   * GetHealth: Get store health statistics.
+   * Performs a scan of all objects to collect stats.
+   * @param stats Output: health statistics
+   * @return OK on success
+   */
+  rocksdb::Status GetHealth(HealthStats* stats) const;
+
+  /** Get current approximate total store size in bytes. */
+  uint64_t GetTotalStoreBytes() const;
+
  private:
   explicit Store(const Options& opt);
 
@@ -236,6 +316,10 @@ class Store {
   rocksdb::ColumnFamilyHandle* dedup_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* refcount_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* meta_cf_ = nullptr;
+  rocksdb::ColumnFamilyHandle* lru_cf_ = nullptr;  // LRU index for eviction
+
+  // Cached total store size (updated on Put/Delete)
+  mutable std::atomic<uint64_t> total_store_bytes_{0};
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Semantic dedup members (only used when dedup_mode == kSemantic)

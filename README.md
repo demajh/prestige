@@ -338,6 +338,17 @@ curl -LO https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/vocab.txt
 # Delete keys (GC happens when refcount hits 0)
 ./build/prestige_cli ./prestige_db del k1
 ./build/prestige_cli ./prestige_db del k2
+
+# Cache management
+./build/prestige_cli ./prestige_db health                  # Show store health stats
+./build/prestige_cli ./prestige_db sweep                   # Delete expired/orphaned objects
+./build/prestige_cli ./prestige_db prune 3600 1800         # Delete objects older than 1hr OR idle for 30min
+./build/prestige_cli ./prestige_db evict 1073741824        # Evict LRU until ≤1GB
+
+# List keys
+./build/prestige_cli ./prestige_db keys                    # List all keys
+./build/prestige_cli ./prestige_db keys "user:" 100        # List up to 100 keys with prefix "user:"
+./build/prestige_cli ./prestige_db count                   # Count keys and unique values
 ```
 
 ### Programmatic Usage
@@ -390,6 +401,15 @@ db->Put("key2", "A fast brown fox leaps above a sleepy dog.");  // Semantic matc
 | `enable_gc` | true | Whether to delete objects when refcount reaches 0 |
 | `dedup_mode` | `kExact` | Deduplication mode: `kExact` or `kSemantic` |
 
+### Cache behavior options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `default_ttl_seconds` | 0 | Default TTL for objects in seconds (0 = no expiration) |
+| `max_store_bytes` | 0 | Maximum store size in bytes (0 = unlimited) |
+| `eviction_target_ratio` | 0.8 | When evicting, reduce to this ratio of max_store_bytes |
+| `track_access_time` | true | Track last access time for LRU (slight overhead on Get) |
+
 ### Semantic mode options
 
 | Option | Default | Description |
@@ -408,6 +428,70 @@ db->Put("key2", "A fast brown fox leaps above a sleepy dog.");  // Semantic matc
 | `hnsw_m` | 16 | Max connections per node |
 | `hnsw_ef_construction` | 200 | Build-time search depth |
 | `hnsw_ef_search` | 50 | Query-time search depth |
+
+---
+
+## Cache Semantics
+
+Prestige supports optional TTL-based expiration and LRU-based eviction for cache-like use cases. Both are disabled by default.
+
+### TTL Expiration
+
+When `default_ttl_seconds > 0`, objects expire based on their creation time:
+
+- Expired objects return `NotFound` on `Get()` (same behavior as missing keys)
+- All keys pointing to an expired object will return `NotFound`
+- Expired objects are not automatically deleted; use `Sweep()` or `Prune()` to reclaim space
+
+```cpp
+prestige::Options opt;
+opt.default_ttl_seconds = 3600;  // 1 hour TTL
+```
+
+### LRU Eviction
+
+When `max_store_bytes > 0`, you can trigger LRU eviction to reclaim space:
+
+- Each `Get()` updates the object's last-access timestamp (if `track_access_time=true`)
+- `EvictLRU(target_bytes)` removes least-recently-used objects until the store is at or below the target size
+- Eviction removes both the objects and all user keys pointing to them
+
+```cpp
+prestige::Options opt;
+opt.max_store_bytes = 1024 * 1024 * 1024;  // 1 GB limit
+opt.eviction_target_ratio = 0.8;           // Evict to 80% when triggered
+
+// Later, trigger eviction manually:
+uint64_t evicted = 0;
+db->EvictLRU(opt.max_store_bytes * opt.eviction_target_ratio, &evicted);
+```
+
+### Cache Management Methods
+
+| Method | Description |
+|--------|-------------|
+| `Sweep(uint64_t* deleted)` | Delete all expired and orphaned (refcount=0) objects |
+| `Prune(max_age_s, max_idle_s, uint64_t* deleted)` | Delete objects older than `max_age_s` or not accessed for `max_idle_s` |
+| `EvictLRU(target_bytes, uint64_t* evicted)` | Evict LRU objects until store size ≤ target_bytes |
+| `GetHealth(HealthStats* stats)` | Get store health statistics |
+| `GetTotalStoreBytes()` | Get current approximate store size |
+
+### Health Statistics
+
+`GetHealth()` returns a `HealthStats` struct:
+
+```cpp
+struct HealthStats {
+  uint64_t total_keys;          // Number of user keys
+  uint64_t total_objects;       // Number of unique deduplicated objects
+  uint64_t total_bytes;         // Total size of all objects
+  uint64_t expired_objects;     // Objects past TTL (not yet swept)
+  uint64_t orphaned_objects;    // Objects with refcount=0 (not yet GC'd)
+  uint64_t oldest_object_age_s; // Age of oldest object in seconds
+  uint64_t newest_access_age_s; // Time since most recent access
+  double dedup_ratio;           // Ratio of keys to objects (higher = more dedup)
+};
+```
 
 ---
 
@@ -447,6 +531,10 @@ The store emits a small, stable set of counters/histograms/gauges (names are str
   - Counters: `prestige.cache.hit_total`, `prestige.cache.miss_total` (deltas since last call)
   - Gauges: `prestige.cache.fill_ratio` (0.0-1.0), `prestige.cache.usage_bytes`, `prestige.cache.capacity_bytes`
   - Gauges: `prestige.bloom.useful_total`, `prestige.bloom.checked_total`
+- TTL/LRU management:
+  - Counters: `prestige.get.expired_total` (objects returned NotFound due to TTL)
+  - Counters: `prestige.sweep.deleted_total`, `prestige.prune.deleted_total`, `prestige.evict.deleted_total`
+  - Gauges: `prestige.store.total_bytes` (current store size)
 
 #### Tracing emitted
 
@@ -488,7 +576,6 @@ Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
 
 - End-to-end RAG examples + benchmark harness
 - Public embedding-cache functions: `GetEmbedding*`, `PutEmbedding*`, and metadata access (dims/dtype/model fingerprint), ideally via an `EmbeddingCache` wrapper atop the generic store.
-- Cache semantics: TTL and/or size-based eviction, plus tooling to sweep/prune and report cache size/health.
 - Python bindings & integrations: a pip-installable package (wheels), plus LangChain/LlamaIndex adapters and minimal “drop-in cached embeddings” examples.
 - Canonical text normalization (safe defaults, configurable) so cache keys stay stable across harmless formatting differences.
 - Concurrency: “inflight” reservation/lease support so multiple workers don’t double-embed the same missing chunk.
