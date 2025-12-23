@@ -75,7 +75,10 @@ if(PRESTIGE_ENABLE_SEMANTIC)
 endif()
 
 # --- Library sources ---
-set(PRESTIGE_SOURCES src/store.cpp)
+set(PRESTIGE_SOURCES
+  src/store.cpp
+  src/normalize.cpp
+)
 
 if(PRESTIGE_ENABLE_SEMANTIC)
   list(APPEND PRESTIGE_SOURCES
@@ -155,7 +158,7 @@ include(CMakePackageConfigHelpers)
 set_target_properties(prestige_uvs PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR}
-  PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/store.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/internal.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/version.hpp"
+  PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/store.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/internal.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/version.hpp;${CMAKE_CURRENT_SOURCE_DIR}/include/prestige/normalize.hpp"
 )
 
 # Install library

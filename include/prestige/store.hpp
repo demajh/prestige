@@ -14,6 +14,8 @@
 #include <rocksdb/slice.h>
 #include <rocksdb/utilities/transaction_db.h>
 
+#include <prestige/normalize.hpp>
+
 namespace prestige {
 
 /** A minimal metrics sink interface (counters + histograms + gauges). */
@@ -128,6 +130,23 @@ struct Options {
 
   // Deduplication mode: kExact (SHA-256, default) or kSemantic (embeddings)
   DedupMode dedup_mode = DedupMode::kExact;
+
+  // ---------------------------------------------------------------------------
+  // Text normalization settings (for dedup key computation)
+  // ---------------------------------------------------------------------------
+
+  // Normalization mode for computing dedup keys (default: kNone for exact byte match).
+  // Note: Normalization affects ONLY the digest key; original values are stored unchanged.
+  NormalizationMode normalization_mode = NormalizationMode::kNone;
+
+  // Maximum bytes to normalize (longer values skip normalization and use raw bytes).
+  // This prevents excessive memory allocation for huge values.
+  // Set to 0 for unlimited.
+  size_t normalization_max_bytes = 1024 * 1024;  // 1MB default
+
+  // ---------------------------------------------------------------------------
+  // Semantic deduplication settings (only used when dedup_mode == kSemantic)
+  // ---------------------------------------------------------------------------
 
   // Path to ONNX model file (REQUIRED for semantic mode)
   // The vocabulary file (vocab.txt) is expected to be in the same directory.

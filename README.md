@@ -410,6 +410,13 @@ db->Put("key2", "A fast brown fox leaps above a sleepy dog.");  // Semantic matc
 | `eviction_target_ratio` | 0.8 | When evicting, reduce to this ratio of max_store_bytes |
 | `track_access_time` | true | Track last access time for LRU (slight overhead on Get) |
 
+### Text normalization options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `normalization_mode` | `kNone` | Normalization level: `kNone`, `kWhitespace`, `kASCII`, or `kUnicode` |
+| `normalization_max_bytes` | 1MB | Skip normalization for values larger than this (0 = unlimited) |
+
 ### Semantic mode options
 
 | Option | Default | Description |
@@ -428,6 +435,50 @@ db->Put("key2", "A fast brown fox leaps above a sleepy dog.");  // Semantic matc
 | `hnsw_m` | 16 | Max connections per node |
 | `hnsw_ef_construction` | 200 | Build-time search depth |
 | `hnsw_ef_search` | 50 | Query-time search depth |
+
+---
+
+## Text Normalization
+
+Prestige supports optional text normalization to ensure stable dedup keys across harmless formatting differences. Normalization is applied only for computing the dedup key; original values are always stored unchanged.
+
+### Normalization Levels
+
+| Level | Description |
+|-------|-------------|
+| `kNone` | No normalization (default). Byte-exact deduplication. |
+| `kWhitespace` | Collapse multiple whitespace to single space, trim edges. |
+| `kASCII` | Whitespace + ASCII case folding (A-Z → a-z). |
+| `kUnicode` | Whitespace + ASCII + common Unicode normalizations. |
+
+### Unicode Normalizations (kUnicode mode)
+
+The `kUnicode` mode handles common cases without external dependencies:
+
+- **Ligatures**: ﬁ → fi, ﬂ → fl, ﬀ → ff, ﬃ → ffi, ﬄ → ffl
+- **Superscripts**: ¹²³⁴⁵⁶⁷⁸⁹⁰ → 1234567890
+- **Subscripts**: ₀₁₂₃₄₅₆₇₈₉ → 0123456789
+- **Fractions**: ½ → 1/2, ¼ → 1/4, ¾ → 3/4
+- **Fullwidth ASCII**: Ａ-Ｚ → a-z, ａ-ｚ → a-z, ０-９ → 0-9
+- **Latin-1 case folding**: Ä → ä, É → é, etc.
+
+### Example Usage
+
+```cpp
+prestige::Options opt;
+opt.normalization_mode = prestige::NormalizationMode::kUnicode;
+
+auto store = prestige::Store::Open("./my_db", &db, opt);
+
+// These will deduplicate despite formatting differences:
+store->Put("k1", "Hello World");     // stored as-is
+store->Put("k2", "  hello  world");  // stored as-is, but dedup key matches k1
+store->Put("k3", "HELLO WORLD");     // stored as-is, but dedup key matches k1
+
+// Get returns original values:
+std::string v;
+store->Get("k2", &v);  // Returns "  hello  world"
+```
 
 ---
 
@@ -516,7 +567,7 @@ The store emits a small, stable set of counters/histograms/gauges (names are str
   - Counters: `prestige.put.calls`, `prestige.put.ok_total`, `prestige.put.timed_out_total`, `prestige.put.error_total`,
     `prestige.put.retry_total`, `prestige.put.dedup_hit_total`, `prestige.put.dedup_miss_total`,
     `prestige.put.object_created_total`, `prestige.put.noop_overwrite_total`
-  - Histograms: `prestige.put.latency_us`, `prestige.put.sha256_us`, `prestige.put.commit_us`, `prestige.put.value_bytes`, `prestige.put.attempts`, `prestige.put.batch_writes`
+  - Histograms: `prestige.put.latency_us`, `prestige.put.sha256_us`, `prestige.put.normalize_us`, `prestige.put.commit_us`, `prestige.put.value_bytes`, `prestige.put.attempts`, `prestige.put.batch_writes`
 - Delete:
   - Counters: `prestige.delete.calls`, `prestige.delete.ok_total`, `prestige.delete.not_found_total`, `prestige.delete.timed_out_total`, `prestige.delete.error_total`, `prestige.delete.retry_total`
   - Histograms: `prestige.delete.latency_us`, `prestige.delete.commit_us`, `prestige.delete.attempts`, `prestige.delete.batch_writes`
@@ -576,9 +627,8 @@ Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
 
 - End-to-end RAG examples + benchmark harness
 - Public embedding-cache functions: `GetEmbedding*`, `PutEmbedding*`, and metadata access (dims/dtype/model fingerprint), ideally via an `EmbeddingCache` wrapper atop the generic store.
-- Python bindings & integrations: a pip-installable package (wheels), plus LangChain/LlamaIndex adapters and minimal “drop-in cached embeddings” examples.
-- Canonical text normalization (safe defaults, configurable) so cache keys stay stable across harmless formatting differences.
-- Concurrency: “inflight” reservation/lease support so multiple workers don’t double-embed the same missing chunk.
+- Python bindings & integrations: a pip-installable package (wheels), plus LangChain/LlamaIndex adapters and minimal "drop-in cached embeddings" examples.
+- Concurrency: "inflight" reservation/lease support so multiple workers don't double-embed the same missing chunk.
 - Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (and batch variants for dedup-key operations) to amortize transaction cost and match embedding-provider batching.
 - Model/version-aware cache keys + binary embedding format + metadata (dims/dtype/etc.), and a configurable “bring your own embedder” interface so users can plug in OpenAI/Cohere/local/ONNX/etc.
 - Explicit dedup-key operations (pre-embed lookup): e.g., `GetByDedupKey`, `PutByDedupKey`, and (optionally) `Link(alias_key → dedup_key)` so you dedup *before* computing embeddings.

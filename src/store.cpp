@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include <prestige/internal.hpp>
+#include <prestige/normalize.hpp>
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 #include <prestige/embedder.hpp>
@@ -944,7 +945,28 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
 
   // Exact mode: Compute SHA-256 digest as dedup key
   const uint64_t sha_start_us = prestige::internal::NowMicros();
-  auto digest = prestige::internal::Sha256::Digest(value_bytes);
+
+  // Apply normalization for dedup key computation (if enabled)
+  std::string normalized_value;
+  std::string_view digest_input = value_bytes;
+
+  if (opt_.normalization_mode != NormalizationMode::kNone) {
+    // Skip normalization for huge values (configurable limit)
+    if (opt_.normalization_max_bytes == 0 ||
+        value_bytes.size() <= opt_.normalization_max_bytes) {
+      const uint64_t norm_start_us = prestige::internal::NowMicros();
+      normalized_value = prestige::internal::Normalize(value_bytes, opt_.normalization_mode);
+      EmitHistogram(opt_, "prestige.put.normalize_us",
+                    prestige::internal::NowMicros() - norm_start_us);
+      digest_input = normalized_value;
+      if (span) {
+        SpanAttr(span.get(), "normalized_bytes",
+                 static_cast<uint64_t>(normalized_value.size()));
+      }
+    }
+  }
+
+  auto digest = prestige::internal::Sha256::Digest(digest_input);
   EmitHistogram(opt_, "prestige.put.sha256_us", prestige::internal::NowMicros() - sha_start_us);
   std::string digest_key = prestige::internal::ToBytes(digest.data(), digest.size());
 
