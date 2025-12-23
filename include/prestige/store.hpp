@@ -114,8 +114,25 @@ struct Options {
   double eviction_target_ratio = 0.8;
 
   // Enable tracking of last access time (required for LRU eviction).
-  // Has slight write overhead on every Get().
   bool track_access_time = true;
+
+  // Minimum interval between LRU timestamp updates for the same object (seconds).
+  // When an object is accessed, the LRU index is only updated if at least this
+  // much time has passed since the last update. This dramatically reduces write
+  // amplification for read-heavy workloads.
+  //
+  // Trade-off: LRU ordering becomes approximate within this time window.
+  // Objects accessed at t=0 and t=3599 (with 1-hour interval) have the same
+  // LRU priority until the next access after the interval expires.
+  //
+  // Recommended values:
+  //   0      = Update on every Get (original behavior, maximum write load)
+  //   60     = 1 minute (good balance for most workloads)
+  //   3600   = 1 hour (minimal writes, coarse LRU granularity)
+  //   86400  = 1 day (very coarse, suitable for archival workloads)
+  //
+  // Default: 3600 (1 hour) - max 24 LRU writes per object per day
+  uint64_t lru_update_interval_seconds = 3600;
 
   // Observability hooks (optional)
   //

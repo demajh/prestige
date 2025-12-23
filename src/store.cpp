@@ -333,20 +333,34 @@ rocksdb::Status Store::Get(std::string_view user_key, std::string* value_bytes_o
         if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta) && !meta.IsLegacy()) {
           uint64_t old_access_us = meta.last_accessed_us;
           uint64_t now_us = prestige::internal::WallClockMicros();
-          meta.last_accessed_us = now_us;
 
-          // Update metadata and LRU index (best-effort, don't fail the Get)
-          rocksdb::WriteBatch batch;
-          batch.Put(meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(meta.Serialize()));
+          // Only update LRU if enough time has passed since last update.
+          // This reduces write amplification for read-heavy workloads.
+          // With lru_update_interval_seconds=3600, an object accessed 10K times/hour
+          // generates only 1 LRU write instead of 10K.
+          uint64_t interval_us = opt_.lru_update_interval_seconds * 1000000ULL;
+          uint64_t time_since_update = now_us - old_access_us;
 
-          // Delete old LRU entry and add new one
-          std::string old_lru_key = prestige::internal::MakeLRUKey(old_access_us, obj_id);
-          std::string new_lru_key = prestige::internal::MakeLRUKey(now_us, obj_id);
-          batch.Delete(lru_cf_, rocksdb::Slice(old_lru_key));
-          batch.Put(lru_cf_, rocksdb::Slice(new_lru_key), rocksdb::Slice());
+          if (interval_us == 0 || time_since_update >= interval_us) {
+            meta.last_accessed_us = now_us;
 
-          rocksdb::WriteOptions wo;
-          (void)db_->Write(wo, &batch);
+            // Update metadata and LRU index (best-effort, don't fail the Get)
+            rocksdb::WriteBatch batch;
+            batch.Put(meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(meta.Serialize()));
+
+            // Delete old LRU entry and add new one
+            std::string old_lru_key = prestige::internal::MakeLRUKey(old_access_us, obj_id);
+            std::string new_lru_key = prestige::internal::MakeLRUKey(now_us, obj_id);
+            batch.Delete(lru_cf_, rocksdb::Slice(old_lru_key));
+            batch.Put(lru_cf_, rocksdb::Slice(new_lru_key), rocksdb::Slice());
+
+            rocksdb::WriteOptions wo;
+            (void)db_->Write(wo, &batch);
+
+            EmitCounter(opt_, "prestige.lru.update_total", 1);
+          } else {
+            EmitCounter(opt_, "prestige.lru.skip_total", 1);
+          }
         }
       }
     }
