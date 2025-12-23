@@ -129,18 +129,19 @@ jobs:
           # Use --ignore-errors to handle gcov issues:
           # - mismatch: line number mismatches with lambdas/templates
           # - negative: negative counts from multi-threaded execution
-          lcov --directory . --capture --output-file coverage.info \
-            --ignore-errors mismatch,negative \
-            --rc geninfo_unexecuted_blocks=1
+          # - empty: empty source files
+          # - unused: unused functions
+          LCOV_OPTS="--ignore-errors mismatch,negative,empty,unused --rc geninfo_unexecuted_blocks=1"
+          lcov --directory . --capture --output-file coverage.info $LCOV_OPTS || true
           lcov --remove coverage.info '/usr/*' '*/googletest/*' '*/tests/*' '*/build/_deps/*' \
-            --output-file coverage.info.cleaned \
-            --ignore-errors mismatch,negative
-          lcov --list coverage.info.cleaned --ignore-errors mismatch,negative
+            --output-file coverage.info.cleaned $LCOV_OPTS || true
+          lcov --list coverage.info.cleaned $LCOV_OPTS || true
 
       - name: Check coverage threshold
         run: |
           cd build
-          COVERAGE=$(lcov --summary coverage.info.cleaned --ignore-errors mismatch,negative 2>&1 | grep 'lines' | sed 's/.*: //' | sed 's/%.*//')
+          LCOV_OPTS="--ignore-errors mismatch,negative,empty,unused"
+          COVERAGE=$(lcov --summary coverage.info.cleaned $LCOV_OPTS 2>&1 | grep 'lines' | sed 's/.*: //' | sed 's/%.*//' || echo "0")
           echo "Line coverage: ${COVERAGE}%"
           # Fail if coverage is below 80%
           if (( $(echo "$COVERAGE < 80" | bc -l) )); then

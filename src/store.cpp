@@ -922,19 +922,8 @@ rocksdb::Status Store::Flush() {
   EmitCounter(opt_, "prestige.flush.calls", 1);
   const uint64_t start_us = prestige::internal::NowMicros();
 
-  // Flush all column families with WAL sync
-  rocksdb::FlushOptions flush_opts;
-  flush_opts.wait = true;  // Wait for flush to complete
-  flush_opts.allow_write_stall = true;  // Allow stalling writes during flush
-
-  rocksdb::Status s = db_->Flush(flush_opts, handles_);
-  if (!s.ok()) {
-    EmitCounter(opt_, "prestige.flush.error_total", 1);
-    return s;
-  }
-
-  // Sync WAL to ensure durability
-  s = db_->SyncWAL();
+  // Sync WAL to ensure durability of committed transactions
+  rocksdb::Status s = db_->SyncWAL();
   if (!s.ok()) {
     EmitCounter(opt_, "prestige.flush.sync_error_total", 1);
     return s;
