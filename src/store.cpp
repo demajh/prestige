@@ -1549,9 +1549,51 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
     bool creating_new_object = false;
 
     if (dedup_hit_final) {
-      // Semantic match found - reuse existing object
-      obj_id = matched_obj_id;
-    } else {
+      // Semantic match found outside transaction - must verify object still exists.
+      //
+      // Why this check is needed:
+      // The vector search happens BEFORE the transaction starts. Between finding
+      // matched_obj_id and now, another thread could have:
+      //   1. Deleted the last user_key pointing to matched_obj_id
+      //   2. Decremented its refcount to 0
+      //   3. GC'd the object, deleting: object_store, refcount row, embeddings
+      //
+      // Without this check, AdjustRefcountLocked would see "refcount not found",
+      // interpret it as "this is a brand new object, start at 0", and increment
+      // to 1. The transaction commits, creating:
+      //   - user_key -> matched_obj_id (mapping exists)
+      //   - refcount[matched_obj_id] = 1 (newly written)
+      //   - object_store[matched_obj_id] = MISSING (deleted by GC!)
+      //
+      // This causes Get(user_key) to fail with NotFound on the object lookup.
+      //
+      // The fix: GetForUpdate on object bytes to lock and verify existence.
+      // If the matched object was deleted, we cannot reuse it. Instead, we
+      // store the new value in a fresh object (same as if no match was found).
+      std::string existing_bytes;
+      rocksdb::Status s = txn->GetForUpdate(ro, objects_cf_,
+                                             rocksdb::Slice(matched_obj_id),
+                                             &existing_bytes);
+      if (s.ok()) {
+        // Object still exists - safe to reuse
+        obj_id = matched_obj_id;
+      } else if (s.IsNotFound()) {
+        // Matched object was GC'd - store value in a new object instead
+        EmitCounter(opt_, "prestige.semantic.stale_match_total", 1);
+        SpanEvent(span, "semantic.stale_match");
+        dedup_hit_final = false;
+        creating_new_object = true;
+      } else {
+        if (prestige::internal::IsRetryableTxnStatus(s)) {
+          EmitCounter(opt_, "prestige.put.retry_total", 1);
+          SpanEvent(span, "retry.object_lock");
+          continue;
+        }
+        return finish(s);
+      }
+    }
+
+    if (!dedup_hit_final) {
       // No match - create new object
       EmitCounter(opt_, "prestige.put.object_created_total", 1);
       creating_new_object = true;
