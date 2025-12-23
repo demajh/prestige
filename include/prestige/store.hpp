@@ -93,6 +93,20 @@ struct Options {
   int lock_timeout_ms = 2000;
   int max_retries = 16;
 
+  // Retry backoff settings (exponential backoff with jitter).
+  // When a transaction conflicts, wait before retrying to avoid thundering herd.
+  // Delay formula: min(max_delay, base_delay * 2^attempt) * random(1 ± jitter/2)
+  //
+  // Example with defaults (1ms base, 100ms max, 50% jitter):
+  //   Attempt 1: 0.75-1.25ms
+  //   Attempt 2: 1.5-2.5ms
+  //   Attempt 3: 3-5ms
+  //   Attempt 4: 6-10ms
+  //   ...capped at 75-125ms
+  uint64_t retry_base_delay_us = 1000;     // 1ms base delay
+  uint64_t retry_max_delay_us = 100000;    // 100ms maximum delay
+  double retry_jitter_factor = 0.5;        // ±50% randomization
+
   // GC behavior
   bool enable_gc = true;
 
@@ -257,8 +271,30 @@ class Store {
   /** Delete user_key mapping and GC objects when unreferenced. */
   rocksdb::Status Delete(std::string_view user_key);
 
+  /** Count user keys (exact, requires full scan - O(N)). */
   rocksdb::Status CountKeys(uint64_t* out_key_count) const;
+
+  /** Count unique deduplicated objects (exact, requires full scan - O(N)). */
   rocksdb::Status CountUniqueValues(uint64_t* out_unique_value_count) const;
+
+  /**
+   * Approximate key count using RocksDB's internal estimates (O(1)).
+   * Fast but may be 10-50% off, especially after many deletes.
+   * Use for dashboards, monitoring, or when exact count isn't critical.
+   */
+  rocksdb::Status CountKeysApprox(uint64_t* out_key_count) const;
+
+  /**
+   * Approximate unique object count using RocksDB's internal estimates (O(1)).
+   * Fast but may be 10-50% off, especially after many deletes.
+   */
+  rocksdb::Status CountUniqueValuesApprox(uint64_t* out_unique_value_count) const;
+
+  /**
+   * Get approximate total store size using RocksDB's internal estimates (O(1)).
+   * Returns estimated live data size across all column families.
+   */
+  rocksdb::Status GetTotalStoreBytesApprox(uint64_t* out_bytes) const;
 
   rocksdb::Status ListKeys(std::vector<std::string>* out_keys,
 			   uint64_t limit = 0,

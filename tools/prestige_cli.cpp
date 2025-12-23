@@ -9,7 +9,8 @@ static void usage(const char* argv0) {
       << "  " << argv0 << " <db_path> put <key> <value>\n"
       << "  " << argv0 << " <db_path> get <key>\n"
       << "  " << argv0 << " <db_path> del <key>\n"
-      << "  " << argv0 << " <db_path> count\n"
+      << "  " << argv0 << " <db_path> count          (exact, O(N) scan)\n"
+      << "  " << argv0 << " <db_path> count-approx   (fast O(1) estimate)\n"
       << "  " << argv0 << " <db_path> keys [prefix] [limit]\n"
       << "  " << argv0 << " <db_path> sweep\n"
       << "  " << argv0 << " <db_path> prune <max_age_s> <max_idle_s>\n"
@@ -74,6 +75,29 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::cout << "keys=" << keys << " unique_values=" << uniq << "\n";
+    return 0;
+  } else if (cmd == "count-approx") {
+    if (argc != 3) { usage(argv[0]); return 2; }
+    uint64_t keys = 0;
+    uint64_t uniq = 0;
+    uint64_t bytes = 0;
+    s = db->CountKeysApprox(&keys);
+    if (!s.ok()) {
+      std::cerr << "CountKeysApprox failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    s = db->CountUniqueValuesApprox(&uniq);
+    if (!s.ok()) {
+      std::cerr << "CountUniqueValuesApprox failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    s = db->GetTotalStoreBytesApprox(&bytes);
+    if (!s.ok()) {
+      std::cerr << "GetTotalStoreBytesApprox failed: " << s.ToString() << "\n";
+      return 1;
+    }
+    std::cout << "keys~=" << keys << " unique_values~=" << uniq
+              << " bytes~=" << bytes << " (approximate)\n";
     return 0;
   } else if (cmd == "keys") {
     // keys [prefix] [limit]

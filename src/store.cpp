@@ -8,6 +8,8 @@
 #include <rocksdb/utilities/transaction.h>
 
 #include <cstring>
+#include <random>
+#include <thread>
 
 #include <prestige/internal.hpp>
 #include <prestige/normalize.hpp>
@@ -95,6 +97,39 @@ rocksdb::ColumnFamilyOptions MakeCFOptions(const std::shared_ptr<rocksdb::Cache>
   rocksdb::ColumnFamilyOptions cfo;
   cfo.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table));
   return cfo;
+}
+
+// Compute retry delay with exponential backoff and jitter.
+// Formula: min(max_delay, base_delay * 2^attempt) * random(1 ± jitter/2)
+// This prevents thundering herd when multiple transactions retry simultaneously.
+inline uint64_t ComputeRetryDelay(const prestige::Options& opt, int attempt) {
+  // Exponential backoff: base * 2^attempt, capped at max
+  uint64_t delay_us = opt.retry_base_delay_us * (1ULL << attempt);
+  delay_us = std::min(delay_us, opt.retry_max_delay_us);
+
+  // Add jitter: multiply by random factor in [1-j/2, 1+j/2]
+  // Thread-local RNG for efficiency
+  thread_local std::mt19937_64 rng([] {
+    std::random_device rd;
+    return rd();
+  }());
+
+  double jitter_min = 1.0 - opt.retry_jitter_factor / 2.0;
+  double jitter_max = 1.0 + opt.retry_jitter_factor / 2.0;
+  std::uniform_real_distribution<double> dist(jitter_min, jitter_max);
+
+  return static_cast<uint64_t>(delay_us * dist(rng));
+}
+
+// Sleep for the computed backoff duration and emit metrics.
+inline void BackoffBeforeRetry(const prestige::Options& opt, int attempt,
+                               prestige::TraceSpan* span) {
+  uint64_t delay_us = ComputeRetryDelay(opt, attempt);
+  std::this_thread::sleep_for(std::chrono::microseconds(delay_us));
+  EmitHistogram(opt, "prestige.txn.backoff_us", delay_us);
+  if (span) {
+    span->SetAttribute("backoff_us", delay_us);
+  }
 }
 
 }  // namespace
@@ -424,6 +459,65 @@ rocksdb::Status Store::CountUniqueValues(uint64_t* out_unique_value_count) const
   if (!iter_status.ok()) return iter_status;
 
   *out_unique_value_count = count;
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::CountKeysApprox(uint64_t* out_key_count) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out_key_count) return rocksdb::Status::InvalidArgument("out_key_count is null");
+
+  // Use RocksDB's internal estimate - O(1) but approximate.
+  // Can be 10-50% off, especially after many deletes (tombstones not compacted).
+  uint64_t estimate = 0;
+  if (!db_->GetIntProperty(user_kv_cf_, "rocksdb.estimate-num-keys", &estimate)) {
+    return rocksdb::Status::NotSupported("estimate-num-keys not available");
+  }
+
+  *out_key_count = estimate;
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::CountUniqueValuesApprox(uint64_t* out_unique_value_count) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out_unique_value_count) return rocksdb::Status::InvalidArgument("out_unique_value_count is null");
+
+  // Use RocksDB's internal estimate for refcount CF - O(1) but approximate.
+  // Note: This counts all refcount entries, including those with rc=0 (orphaned).
+  // For exact count of live objects, use CountUniqueValues().
+  uint64_t estimate = 0;
+  if (!db_->GetIntProperty(refcount_cf_, "rocksdb.estimate-num-keys", &estimate)) {
+    return rocksdb::Status::NotSupported("estimate-num-keys not available");
+  }
+
+  *out_unique_value_count = estimate;
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::GetTotalStoreBytesApprox(uint64_t* out_bytes) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out_bytes) return rocksdb::Status::InvalidArgument("out_bytes is null");
+
+  // Sum live data size estimates across relevant column families.
+  // This is O(1) but approximate - doesn't account for compression ratio accurately.
+  uint64_t total = 0;
+  uint64_t cf_size = 0;
+
+  // Object store (the bulk of data)
+  if (db_->GetIntProperty(objects_cf_, "rocksdb.estimate-live-data-size", &cf_size)) {
+    total += cf_size;
+  }
+
+  // Metadata
+  if (db_->GetIntProperty(meta_cf_, "rocksdb.estimate-live-data-size", &cf_size)) {
+    total += cf_size;
+  }
+
+  // User key mappings
+  if (db_->GetIntProperty(user_kv_cf_, "rocksdb.estimate-live-data-size", &cf_size)) {
+    total += cf_size;
+  }
+
+  *out_bytes = total;
   return rocksdb::Status::OK();
 }
 
@@ -1057,6 +1151,7 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
         if (prestige::internal::IsRetryableTxnStatus(s)) {
           EmitCounter(opt_, "prestige.put.retry_total", 1);
           SpanEvent(span.get(), "retry.user_key_lock");
+          BackoffBeforeRetry(opt_, attempt, span.get());
           total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
           attempt_start_us = prestige::internal::NowMicros();
           continue;
@@ -1119,6 +1214,7 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
         if (prestige::internal::IsRetryableTxnStatus(s)) {
           EmitCounter(opt_, "prestige.put.retry_total", 1);
           SpanEvent(span.get(), "retry.dedup_lock");
+          BackoffBeforeRetry(opt_, attempt, span.get());
           total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
           attempt_start_us = prestige::internal::NowMicros();
           continue;
@@ -1187,6 +1283,7 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
     if (prestige::internal::IsRetryableTxnStatus(cs)) {
       EmitCounter(opt_, "prestige.put.retry_total", 1);
       SpanEvent(span.get(), "retry.commit");
+      BackoffBeforeRetry(opt_, attempt, span.get());
       total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
       attempt_start_us = prestige::internal::NowMicros();
       continue;
@@ -1266,6 +1363,7 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
       if (prestige::internal::IsRetryableTxnStatus(s)) {
         EmitCounter(opt_, "prestige.delete.retry_total", 1);
         SpanEvent(span.get(), "retry.user_key_lock");
+        BackoffBeforeRetry(opt_, attempt, span.get());
         total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
         attempt_start_us = prestige::internal::NowMicros();
         continue;
@@ -1333,6 +1431,7 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
     if (prestige::internal::IsRetryableTxnStatus(cs)) {
       EmitCounter(opt_, "prestige.delete.retry_total", 1);
       SpanEvent(span.get(), "retry.commit");
+      BackoffBeforeRetry(opt_, attempt, span.get());
       total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
       attempt_start_us = prestige::internal::NowMicros();
       continue;
@@ -1553,6 +1652,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
         if (prestige::internal::IsRetryableTxnStatus(s)) {
           EmitCounter(opt_, "prestige.put.retry_total", 1);
           SpanEvent(span, "retry.user_key_lock");
+          BackoffBeforeRetry(opt_, attempt, span);
           continue;
         }
         return finish(s);
@@ -1601,6 +1701,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
         if (prestige::internal::IsRetryableTxnStatus(s)) {
           EmitCounter(opt_, "prestige.put.retry_total", 1);
           SpanEvent(span, "retry.object_lock");
+          BackoffBeforeRetry(opt_, attempt, span);
           continue;
         }
         return finish(s);
@@ -1724,6 +1825,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
     if (prestige::internal::IsRetryableTxnStatus(cs)) {
       EmitCounter(opt_, "prestige.put.retry_total", 1);
       SpanEvent(span, "retry.commit");
+      BackoffBeforeRetry(opt_, attempt, span);
       continue;
     }
 
