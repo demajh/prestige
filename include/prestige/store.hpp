@@ -317,6 +317,11 @@ class Store {
                                    uint64_t op_start_us);
   rocksdb::Status DeleteSemanticObject(rocksdb::Transaction* txn,
                                         const std::string& obj_id);
+  // Apply pending vector index operations after successful commit
+  void ApplyPendingVectorOps(const std::vector<std::string>& pending_deletes,
+                             const std::vector<std::pair<std::string, std::vector<float>>>& pending_adds);
+  // Replay any pending vector ops from previous run (crash recovery)
+  void ReplayPendingVectorOps();
 #endif
 
   Options opt_;
@@ -343,6 +348,7 @@ class Store {
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Semantic dedup members (only used when dedup_mode == kSemantic)
   rocksdb::ColumnFamilyHandle* embeddings_cf_ = nullptr;
+  rocksdb::ColumnFamilyHandle* vector_pending_cf_ = nullptr;  // WAL for vector index ops
   std::unique_ptr<internal::Embedder> embedder_;
   std::unique_ptr<internal::VectorIndex> vector_index_;
   std::string vector_index_path_;  // Path to vector index file

@@ -29,6 +29,7 @@ constexpr const char* kObjectMetaCF  = "prestige_object_meta";
 constexpr const char* kLRUIndexCF    = "prestige_lru_index";
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 constexpr const char* kEmbeddingsCF  = "prestige_embeddings";
+constexpr const char* kVectorPendingCF = "prestige_vector_pending";
 #endif
 
 // --------------------------
@@ -167,9 +168,10 @@ rocksdb::Status Store::Open(const std::string& db_path,
   cfs.emplace_back(kLRUIndexCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
-  // Add embeddings CF for semantic mode
+  // Add embeddings and vector pending CFs for semantic mode
   if (opt.dedup_mode == DedupMode::kSemantic) {
     cfs.emplace_back(kEmbeddingsCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
+    cfs.emplace_back(kVectorPendingCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   }
 #endif
 
@@ -197,6 +199,7 @@ rocksdb::Status Store::Open(const std::string& db_path,
   // Initialize semantic dedup components
   if (opt.dedup_mode == DedupMode::kSemantic) {
     store->embeddings_cf_ = store->handles_[7];
+    store->vector_pending_cf_ = store->handles_[8];
 
     // Create embedder
     std::string embedder_error;
@@ -234,6 +237,9 @@ rocksdb::Status Store::Open(const std::string& db_path,
       // Load failure is not fatal if the file doesn't exist yet
       // But if it exists and is corrupt, we should warn (for now just continue)
     }
+
+    // Replay any pending vector index operations from previous run (crash recovery)
+    store->ReplayPendingVectorOps();
   }
 #endif
 
@@ -1264,11 +1270,17 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
     if (!s.ok()) return finish(s);
     ++batch_writes;  // refcount write
 
+    // Track if we're GC'ing a semantic object (for post-commit vector index update)
+    bool gc_semantic_object = false;
+    std::string gc_obj_id;
+
     if (opt_.enable_gc && cnt == 0) {
 #ifdef PRESTIGE_ENABLE_SEMANTIC
       if (opt_.dedup_mode == DedupMode::kSemantic) {
         s = DeleteSemanticObject(txn.get(), obj_id);
-        batch_writes += 3;  // embeddings, objects, refcount deletes
+        batch_writes += 4;  // pending, embeddings, objects, refcount
+        gc_semantic_object = true;
+        gc_obj_id = obj_id;
       } else {
         s = DeleteObjectIfUnreferencedLocked(
             txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
@@ -1292,7 +1304,17 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
     EmitHistogram(opt_, "prestige.delete.commit_us",
                   prestige::internal::NowMicros() - commit_start_us);
 
-    if (cs.ok()) return finish(cs);
+    if (cs.ok()) {
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+      // Apply pending vector ops AFTER successful commit
+      if (gc_semantic_object && !gc_obj_id.empty()) {
+        std::vector<std::string> pending_deletes = {gc_obj_id};
+        std::vector<std::pair<std::string, std::vector<float>>> pending_adds;
+        ApplyPendingVectorOps(pending_deletes, pending_adds);
+      }
+#endif
+      return finish(cs);
+    }
 
     if (prestige::internal::IsRetryableTxnStatus(cs)) {
       EmitCounter(opt_, "prestige.delete.retry_total", 1);
@@ -1310,19 +1332,88 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 
+// Pending vector op format:
+// Key: obj_id
+// Value: [op_type:1 byte][embedding bytes if add]
+// op_type: 'D' = delete, 'A' = add
+constexpr char kVectorOpDelete = 'D';
+constexpr char kVectorOpAdd = 'A';
+
+void Store::ApplyPendingVectorOps(
+    const std::vector<std::string>& pending_deletes,
+    const std::vector<std::pair<std::string, std::vector<float>>>& pending_adds) {
+  if (!vector_index_) return;
+
+  // Apply deletes
+  for (const auto& obj_id : pending_deletes) {
+    vector_index_->MarkDeleted(obj_id);
+  }
+
+  // Apply adds
+  for (const auto& [obj_id, embedding] : pending_adds) {
+    if (!vector_index_->Add(embedding, obj_id)) {
+      EmitCounter(opt_, "prestige.semantic.index_add_error_total", 1);
+    }
+  }
+
+  // Clear pending ops from RocksDB (best-effort, outside transaction)
+  rocksdb::WriteOptions wo;
+  for (const auto& obj_id : pending_deletes) {
+    (void)db_->Delete(wo, vector_pending_cf_, rocksdb::Slice(obj_id));
+  }
+  for (const auto& [obj_id, embedding] : pending_adds) {
+    (void)db_->Delete(wo, vector_pending_cf_, rocksdb::Slice(obj_id));
+  }
+}
+
+void Store::ReplayPendingVectorOps() {
+  if (!db_ || !vector_pending_cf_ || !vector_index_) return;
+
+  std::vector<std::string> pending_deletes;
+  std::vector<std::pair<std::string, std::vector<float>>> pending_adds;
+
+  rocksdb::ReadOptions ro;
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, vector_pending_cf_));
+
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    std::string obj_id(it->key().data(), it->key().size());
+    std::string_view value(it->value().data(), it->value().size());
+
+    if (value.empty()) continue;
+
+    char op_type = value[0];
+    if (op_type == kVectorOpDelete) {
+      pending_deletes.push_back(std::move(obj_id));
+    } else if (op_type == kVectorOpAdd && value.size() > 1) {
+      std::vector<float> embedding;
+      if (prestige::internal::DeserializeEmbedding(value.substr(1), &embedding)) {
+        pending_adds.emplace_back(std::move(obj_id), std::move(embedding));
+      }
+    }
+  }
+
+  if (!pending_deletes.empty() || !pending_adds.empty()) {
+    EmitCounter(opt_, "prestige.semantic.pending_replayed",
+                pending_deletes.size() + pending_adds.size());
+    ApplyPendingVectorOps(pending_deletes, pending_adds);
+  }
+}
+
 rocksdb::Status Store::DeleteSemanticObject(rocksdb::Transaction* txn,
                                              const std::string& obj_id) {
   if (!txn) return rocksdb::Status::InvalidArgument("txn is null");
 
-  rocksdb::ReadOptions ro;
-
-  // Mark as deleted in vector index (soft delete)
-  if (vector_index_) {
-    vector_index_->MarkDeleted(obj_id);
-  }
+  // Write pending vector delete as part of transaction (WAL pattern).
+  // The actual MarkDeleted call happens AFTER commit succeeds.
+  // This ensures transactional consistency: if commit fails/retries,
+  // the vector index is not mutated.
+  std::string pending_value(1, kVectorOpDelete);
+  rocksdb::Status s = txn->Put(vector_pending_cf_, rocksdb::Slice(obj_id),
+                                rocksdb::Slice(pending_value));
+  if (!s.ok()) return s;
 
   // Delete embedding from embeddings CF
-  rocksdb::Status s = txn->Delete(embeddings_cf_, rocksdb::Slice(obj_id));
+  s = txn->Delete(embeddings_cf_, rocksdb::Slice(obj_id));
   if (!s.ok() && !s.IsNotFound()) return s;
 
   // Remove object bytes
@@ -1455,6 +1546,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
     }
 
     std::string obj_id;
+    bool creating_new_object = false;
 
     if (dedup_hit_final) {
       // Semantic match found - reuse existing object
@@ -1462,6 +1554,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
     } else {
       // No match - create new object
       EmitCounter(opt_, "prestige.put.object_created_total", 1);
+      creating_new_object = true;
 
       auto new_id = prestige::internal::RandomObjectId128();
       obj_id = prestige::internal::ToBytes(new_id.data(), new_id.size());
@@ -1480,6 +1573,14 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       // Initialize refcount to 0 (will be incremented below)
       s = txn->Put(refcount_cf_, rocksdb::Slice(obj_id),
                    rocksdb::Slice(prestige::internal::EncodeU64LE(0)));
+      if (!s.ok()) return finish(s);
+
+      // Write pending vector add as part of transaction (WAL pattern).
+      // The actual Add call happens AFTER commit succeeds.
+      std::string pending_value(1, kVectorOpAdd);
+      pending_value.append(embedding_bytes);
+      s = txn->Put(vector_pending_cf_, rocksdb::Slice(obj_id),
+                   rocksdb::Slice(pending_value));
       if (!s.ok()) return finish(s);
     }
 
@@ -1509,6 +1610,10 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       if (!s.ok()) return finish(s);
     }
 
+    // Track GC'd object for post-commit vector index update
+    bool gc_old_object = false;
+    std::string gc_old_obj_id;
+
     // Decref(old) and GC if needed
     if (had_old && old_obj_id != obj_id) {
       uint64_t old_cnt = 0;
@@ -1518,6 +1623,8 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       if (opt_.enable_gc && old_cnt == 0) {
         s = DeleteSemanticObject(txn.get(), old_obj_id);
         if (!s.ok()) return finish(s);
+        gc_old_object = true;
+        gc_old_obj_id = old_obj_id;
 
         EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
         SpanEvent(span, "gc.delete_object");
@@ -1530,14 +1637,23 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
                   prestige::internal::NowMicros() - commit_start_us);
 
     if (cs.ok()) {
-      // Add to vector index after successful commit (if new object)
-      if (!dedup_hit_final) {
-        if (!vector_index_->Add(embedding, obj_id)) {
-          // Log warning but don't fail - object is stored, just not indexed
-          EmitCounter(opt_, "prestige.semantic.index_add_error_total", 1);
-        }
+      // Apply pending vector ops AFTER successful commit
+      std::vector<std::string> pending_deletes;
+      std::vector<std::pair<std::string, std::vector<float>>> pending_adds;
 
-        // Periodic index save
+      if (creating_new_object) {
+        pending_adds.emplace_back(obj_id, embedding);
+      }
+      if (gc_old_object && !gc_old_obj_id.empty()) {
+        pending_deletes.push_back(gc_old_obj_id);
+      }
+
+      if (!pending_adds.empty() || !pending_deletes.empty()) {
+        ApplyPendingVectorOps(pending_deletes, pending_adds);
+      }
+
+      // Periodic index save
+      if (creating_new_object) {
         semantic_inserts_since_save_++;
         if (opt_.semantic_index_save_interval > 0 &&
             semantic_inserts_since_save_ >= static_cast<uint64_t>(opt_.semantic_index_save_interval)) {
