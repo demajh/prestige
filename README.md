@@ -423,7 +423,7 @@ When unset (the default), there is essentially no overhead.
 
 #### Metrics emitted
 
-The store emits a small, stable set of counters/histograms (names are strings):
+The store emits a small, stable set of counters/histograms/gauges (names are strings):
 
 - Get:
   - Counters: `prestige.get.calls`, `prestige.get.ok_total`, `prestige.get.not_found_total`, `prestige.get.error_total`
@@ -432,15 +432,21 @@ The store emits a small, stable set of counters/histograms (names are strings):
   - Counters: `prestige.put.calls`, `prestige.put.ok_total`, `prestige.put.timed_out_total`, `prestige.put.error_total`,
     `prestige.put.retry_total`, `prestige.put.dedup_hit_total`, `prestige.put.dedup_miss_total`,
     `prestige.put.object_created_total`, `prestige.put.noop_overwrite_total`
-  - Histograms: `prestige.put.latency_us`, `prestige.put.sha256_us`, `prestige.put.commit_us`, `prestige.put.value_bytes`, `prestige.put.attempts`
+  - Histograms: `prestige.put.latency_us`, `prestige.put.sha256_us`, `prestige.put.commit_us`, `prestige.put.value_bytes`, `prestige.put.attempts`, `prestige.put.batch_writes`
 - Delete:
   - Counters: `prestige.delete.calls`, `prestige.delete.ok_total`, `prestige.delete.not_found_total`, `prestige.delete.timed_out_total`, `prestige.delete.error_total`, `prestige.delete.retry_total`
-  - Histograms: `prestige.delete.latency_us`, `prestige.delete.commit_us`, `prestige.delete.attempts`
+  - Histograms: `prestige.delete.latency_us`, `prestige.delete.commit_us`, `prestige.delete.attempts`, `prestige.delete.batch_writes`
+- Transaction waits:
+  - Histogram: `prestige.txn.wait_us` (time spent waiting due to lock contention/retries)
 - GC (immediate mode):
   - Counter: `prestige.gc.deleted_objects_total`
 - Semantic mode (additional):
   - Counters: `prestige.semantic.hit_total`, `prestige.semantic.miss_total`, `prestige.put.embed_error_total`, `prestige.semantic.index_add_error_total`
   - Histograms: `prestige.put.embed_us`, `prestige.semantic.lookup_us`, `prestige.semantic.candidates_checked`
+- Cache (via `EmitCacheMetrics()`):
+  - Counters: `prestige.cache.hit_total`, `prestige.cache.miss_total` (deltas since last call)
+  - Gauges: `prestige.cache.fill_ratio` (0.0-1.0), `prestige.cache.usage_bytes`, `prestige.cache.capacity_bytes`
+  - Gauges: `prestige.bloom.useful_total`, `prestige.bloom.checked_total`
 
 #### Tracing emitted
 
@@ -481,7 +487,6 @@ Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
 ## Roadmap / TODO
 
 - End-to-end RAG examples + benchmark harness
-- Cache-centric observability: metrics for hit/miss, fill rate, inflight waits, batch sizes, and (optionally) embedder latency.
 - Public embedding-cache functions: `GetEmbedding*`, `PutEmbedding*`, and metadata access (dims/dtype/model fingerprint), ideally via an `EmbeddingCache` wrapper atop the generic store.
 - Cache semantics: TTL and/or size-based eviction, plus tooling to sweep/prune and report cache size/health.
 - Python bindings & integrations: a pip-installable package (wheels), plus LangChain/LlamaIndex adapters and minimal “drop-in cached embeddings” examples.
@@ -496,4 +501,4 @@ Events are added for retries (e.g. `retry.commit`) and for GC deletion (e.g.
 
 ## License
 
-This code is released on the Apache 2.0 license.  
+This code is released on the Apache 2.0 license. 

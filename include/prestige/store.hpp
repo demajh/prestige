@@ -6,14 +6,16 @@
 #include <string_view>
 #include <vector>
 
+#include <rocksdb/cache.h>
 #include <rocksdb/options.h>
+#include <rocksdb/statistics.h>
 #include <rocksdb/status.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/utilities/transaction_db.h>
 
 namespace prestige {
 
-/** A minimal metrics sink interface (counters + histograms). */
+/** A minimal metrics sink interface (counters + histograms + gauges). */
 struct MetricsSink {
   virtual ~MetricsSink() = default;
 
@@ -22,6 +24,10 @@ struct MetricsSink {
 
   /** Histograms (e.g., latency in microseconds, sizes in bytes). */
   virtual void Histogram(std::string_view name, uint64_t value) = 0;
+
+  /** Gauges for point-in-time values (e.g., cache fill ratio, queue depth).
+   *  Default implementation does nothing for backwards compatibility. */
+  virtual void Gauge(std::string_view name, double value) { (void)name; (void)value; }
 };
 
 /** A trace span interface (very small surface area). */
@@ -188,6 +194,17 @@ class Store {
   /** Close the store and release RocksDB resources. Safe to call multiple times. */
   void Close();
 
+  /** Emit current cache statistics to the metrics sink.
+   *  Call periodically (e.g., every few seconds) to get cache observability.
+   *  Metrics emitted:
+   *   - prestige.cache.hit_total (counter delta since last call)
+   *   - prestige.cache.miss_total (counter delta since last call)
+   *   - prestige.cache.fill_ratio (gauge, 0.0-1.0)
+   *   - prestige.cache.usage_bytes (gauge)
+   *   - prestige.cache.capacity_bytes (gauge)
+   */
+  void EmitCacheMetrics();
+
  private:
   explicit Store(const Options& opt);
 
@@ -207,6 +224,12 @@ class Store {
 
   rocksdb::TransactionDB* db_ = nullptr;
   std::vector<rocksdb::ColumnFamilyHandle*> handles_;
+
+  // Cache and statistics for observability
+  std::shared_ptr<rocksdb::Cache> block_cache_;
+  std::shared_ptr<rocksdb::Statistics> statistics_;
+  uint64_t last_cache_hits_ = 0;   // For computing deltas
+  uint64_t last_cache_misses_ = 0;
 
   rocksdb::ColumnFamilyHandle* user_kv_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* objects_cf_ = nullptr;
