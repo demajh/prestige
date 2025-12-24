@@ -205,13 +205,14 @@ TEST_F(CrashTest, UncleanCloseAfterDelete) {
 TEST_F(CrashTest, CrashDuringBulkPut) {
   const int kTotalOps = 1000;
   std::atomic<int> ops_completed{0};
+  std::atomic<bool> stop_writing{false};
 
   // Start writing, then "crash" after some ops
   {
     ASSERT_TRUE(OpenStore().ok());
 
-    std::thread writer([this, &ops_completed]() {
-      for (int i = 0; i < kTotalOps; ++i) {
+    std::thread writer([this, &ops_completed, &stop_writing]() {
+      for (int i = 0; i < kTotalOps && !stop_writing.load(); ++i) {
         std::string key = "bulk_" + std::to_string(i);
         std::string value = "value_" + std::to_string(i);
         auto s = store_->Put(key, value);
@@ -226,14 +227,13 @@ TEST_F(CrashTest, CrashDuringBulkPut) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    // Simulate crash by detaching thread and resetting store
-    // Note: This is somewhat racy, but the point is to test recovery
-    writer.detach();
+    // Signal writer to stop and wait for it to finish
+    stop_writing.store(true);
+    writer.join();
+
+    // Simulate crash by resetting store without calling Close()
     store_.reset();
   }
-
-  // Give detached thread time to notice store is gone
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   // Reopen and check invariants
   {
