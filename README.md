@@ -52,7 +52,7 @@ mkdir build && cd build && cmake .. && make
 
 See [docs/building.md](docs/building.md) for detailed build instructions and pre-built binaries.
 
-### Use
+### Use (C++)
 
 ```cpp
 #include <prestige/store.hpp>
@@ -66,6 +66,31 @@ db->Put("key2", "hello world");  // Deduplicates - same content!
 
 std::string value;
 db->Get("key1", &value);  // "hello world"
+```
+
+### Use (Python)
+
+```bash
+# Install from source
+cd python
+pip install .
+```
+
+```python
+import prestige
+
+# Open a store (automatically creates if doesn't exist)
+with prestige.open("./my_db") as store:
+    # Store values
+    store.put("key1", "hello world")
+    store.put("key2", "hello world")  # Deduplicates - same content!
+
+    # Retrieve values
+    value = store.get("key1", decode=True)  # "hello world"
+
+    # Check deduplication stats
+    print(f"Keys: {store.count_keys()}")                    # 2
+    print(f"Unique values: {store.count_unique_values()}")  # 1
 ```
 
 ### CLI
@@ -120,6 +145,7 @@ See [docs/server.md](docs/server.md) for full API reference and configuration op
 | [Building](docs/building.md) | Build instructions and dependencies |
 | [CLI](docs/cli.md) | Command-line tool reference |
 | [HTTP Server](docs/server.md) | REST API server reference |
+| [Python Bindings](docs/python-bindings.md) | Python API reference and examples |
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |
