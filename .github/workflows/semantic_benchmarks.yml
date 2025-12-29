@@ -54,8 +54,37 @@ jobs:
             cmake \
             ninja-build \
             librocksdb-dev \
-            libonnxruntime-dev \
-            pkg-config
+            pkg-config \
+            wget
+
+      - name: Cache ONNX Runtime
+        id: cache-onnx
+        uses: actions/cache@v4
+        with:
+          path: ~/onnxruntime
+          key: ${{ runner.os }}-onnxruntime-1.16.3
+
+      - name: Install ONNX Runtime
+        if: steps.cache-onnx.outputs.cache-hit != 'true'
+        run: |
+          ONNX_VERSION="1.16.3"
+          ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz"
+
+          # Download and extract
+          wget -q ${ONNX_URL} -O onnxruntime.tgz
+          tar -xzf onnxruntime.tgz
+          mv onnxruntime-linux-x64-${ONNX_VERSION} ~/onnxruntime
+
+      - name: Setup ONNX Runtime
+        run: |
+          # Install to /usr/local
+          sudo cp -r ~/onnxruntime/include/* /usr/local/include/
+          sudo cp -r ~/onnxruntime/lib/* /usr/local/lib/
+          sudo ldconfig
+
+          # Verify installation
+          ls -la /usr/local/lib/libonnxruntime*
+          ls -la /usr/local/include/onnxruntime*
 
       - name: Cache RocksDB build
         uses: actions/cache@v4
