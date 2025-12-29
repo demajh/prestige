@@ -27,6 +27,7 @@ option(PRESTIGE_BUILD_TOOLS "Build CLI/tools" ON)
 option(PRESTIGE_BUILD_EXAMPLES "Build examples" ON)
 option(PRESTIGE_BUILD_TESTS "Build unit tests" OFF)
 option(PRESTIGE_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
+option(PRESTIGE_BUILD_SERVER "Build HTTP server (requires Drogon)" OFF)
 option(PRESTIGE_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(PRESTIGE_ENABLE_SEMANTIC "Enable semantic deduplication (requires ONNX Runtime)" OFF)
 option(PRESTIGE_USE_FAISS "Enable FAISS backend for semantic dedup (requires FAISS)" OFF)
@@ -161,6 +162,54 @@ endif()
 if(PRESTIGE_BUILD_TOOLS)
   add_executable(prestige_cli tools/prestige_cli.cpp)
   target_link_libraries(prestige_cli PRIVATE prestige_uvs)
+endif()
+
+# --- HTTP Server ---
+if(PRESTIGE_BUILD_SERVER)
+  # Find Drogon framework
+  find_package(Drogon REQUIRED)
+  message(STATUS "Drogon found: ${Drogon_VERSION}")
+
+  # Server library sources
+  set(PRESTIGE_SERVER_SOURCES
+    src/server/server.cpp
+    src/server/config.cpp
+    src/server/handlers.cpp
+    src/server/metrics.cpp
+    src/server/proxy.cpp
+  )
+
+  add_library(prestige_server ${PRESTIGE_SERVER_SOURCES})
+
+  target_include_directories(prestige_server
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  )
+
+  target_link_libraries(prestige_server
+    PUBLIC
+      prestige_uvs
+      Drogon::Drogon
+  )
+
+  # Server executable
+  add_executable(prestige_server_bin tools/prestige_server.cpp)
+  set_target_properties(prestige_server_bin PROPERTIES OUTPUT_NAME prestige-server)
+  target_link_libraries(prestige_server_bin PRIVATE prestige_server)
+
+  # Install server components
+  install(TARGETS prestige_server prestige_server_bin
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  )
+
+  # Install server headers
+  install(DIRECTORY include/prestige/server
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/prestige
+    FILES_MATCHING PATTERN "*.hpp"
+  )
 endif()
 
 # --- Installation ---
@@ -301,6 +350,32 @@ if(PRESTIGE_BUILD_TESTS)
         COMMENT "Generating code coverage report..."
       )
     endif()
+  endif()
+
+  # Server tests (only when both PRESTIGE_BUILD_TESTS and PRESTIGE_BUILD_SERVER are enabled)
+  if(PRESTIGE_BUILD_SERVER)
+    add_executable(prestige_server_tests
+      tests/server_test.cpp
+    )
+
+    target_link_libraries(prestige_server_tests
+      PRIVATE
+        prestige_server
+        prestige_uvs
+        GTest::gtest
+        GTest::gtest_main
+    )
+
+    target_include_directories(prestige_server_tests
+      PRIVATE
+        ${ROCKSDB_INCLUDE_DIR}
+    )
+
+    gtest_discover_tests(prestige_server_tests
+      DISCOVERY_TIMEOUT 60
+      PROPERTIES
+        TIMEOUT 300
+    )
   endif()
 endif()
 

@@ -32,6 +32,7 @@ The prestige unique value store is a less gruesome, but no less effective way to
 - **Atomic operations** - RocksDB TransactionDB ensures consistency
 - **Observability** - pluggable metrics and distributed tracing hooks
 - **Simple API** - familiar `Put`/`Get`/`Delete` interface
+- **HTTP Server** - REST API for standalone deployment with Prometheus metrics
 
 ## Quick Start
 
@@ -76,6 +77,40 @@ db->Get("key1", &value);  // "hello world"
 ./prestige_cli ./mydb count           # 2 keys, 1 unique value
 ```
 
+### HTTP Server
+
+prestige can run as a standalone HTTP server exposing a REST API:
+
+```bash
+# Build with server support (requires Drogon framework)
+cmake -B build -DPRESTIGE_BUILD_SERVER=ON
+cmake --build build
+
+# Start the server
+./build/prestige-server --db-path ./mydb --port 8080
+```
+
+Use the REST API:
+
+```bash
+# Store a value
+curl -X PUT http://localhost:8080/api/v1/kv/mykey -d "hello world"
+
+# Retrieve a value
+curl http://localhost:8080/api/v1/kv/mykey
+
+# Delete a key
+curl -X DELETE http://localhost:8080/api/v1/kv/mykey
+
+# List keys
+curl "http://localhost:8080/api/v1/kv?prefix=user:&limit=100"
+
+# Health check
+curl http://localhost:8080/health/ready
+```
+
+See [docs/server.md](docs/server.md) for full API reference and configuration options.
+
 ## Documentation
 
 | Document | Description |
@@ -84,6 +119,7 @@ db->Get("key1", &value);  // "hello world"
 | [API Reference](docs/api-reference.md) | Complete API documentation |
 | [Building](docs/building.md) | Build instructions and dependencies |
 | [CLI](docs/cli.md) | Command-line tool reference |
+| [HTTP Server](docs/server.md) | REST API server reference |
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |

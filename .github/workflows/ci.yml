@@ -248,6 +248,51 @@ jobs:
         run: cmake --build build --config Release -j$(nproc)
 
   # =============================================================================
+  # Server Build and Test
+  # =============================================================================
+  server-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librocksdb-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+
+      - name: Install Drogon
+        run: |
+          # Install Drogon dependencies
+          sudo apt-get install -y libbrotli-dev
+
+          # Clone and build Drogon
+          git clone --depth 1 --branch v1.9.1 https://github.com/drogonframework/drogon.git
+          cd drogon
+          git submodule update --init
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Configure CMake with server
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPRESTIGE_BUILD_SERVER=ON \
+            -DPRESTIGE_BUILD_TESTS=ON \
+            -DPRESTIGE_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run server tests
+        run: |
+          cd build
+          ctest --output-on-failure --timeout 300 -R "prestige_server_tests"
+
+  # =============================================================================
   # Memory Safety (ASAN/UBSAN)
   # =============================================================================
   sanitizers:
