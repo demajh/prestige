@@ -335,8 +335,13 @@ jobs:
 
       - name: Run Python tests
         run: |
-          cd python
-          pytest tests/ -v --cov=prestige --cov-report=term --cov-report=xml
+          # Run tests from outside the source directory to avoid import conflicts
+          # Copy tests to a temporary directory
+          cp -r python/tests /tmp/prestige_tests
+          cd /tmp/prestige_tests
+          pytest . -v --cov=prestige --cov-report=term --cov-report=xml
+          # Copy coverage report back
+          cp coverage.xml $GITHUB_WORKSPACE/python/
 
       - name: Run Python examples
         run: |
