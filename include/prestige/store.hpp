@@ -297,6 +297,13 @@ class Store {
   /** Delete user_key mapping and GC objects when unreferenced. */
   rocksdb::Status Delete(std::string_view user_key);
 
+  /**
+   * Get the internal object ID for a key (for debugging/benchmarking).
+   * This allows checking if two keys point to the same deduplicated object.
+   * Returns OK and sets object_id_out if key exists, NotFound otherwise.
+   */
+  rocksdb::Status GetObjectId(std::string_view user_key, std::string* object_id_out) const;
+
   /** Count user keys (exact, requires full scan - O(N)). */
   rocksdb::Status CountKeys(uint64_t* out_key_count) const;
 

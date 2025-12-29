@@ -41,11 +41,15 @@ set(PRESTIGE_PYTHON_SOURCES
 # Conditionally add optional binding sources
 if(PRESTIGE_ENABLE_SEMANTIC OR PRESTIGE_BUILD_SERVER)
     # Observability bindings (for metrics sink used by both)
-    list(APPEND PRESTIGE_PYTHON_SOURCES src/observability_bindings.cpp)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/observability_bindings.cpp)
+        list(APPEND PRESTIGE_PYTHON_SOURCES src/observability_bindings.cpp)
+    endif()
 endif()
 
 if(PRESTIGE_BUILD_SERVER)
-    list(APPEND PRESTIGE_PYTHON_SOURCES src/server_bindings.cpp)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/server_bindings.cpp)
+        list(APPEND PRESTIGE_PYTHON_SOURCES src/server_bindings.cpp)
+    endif()
 endif()
 
 # Create pybind11 module

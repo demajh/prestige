@@ -281,6 +281,25 @@ class PyStore : public std::enable_shared_from_this<PyStore> {
   }
 
   /**
+   * Get the internal object ID for a key.
+   * Returns the object ID as bytes if the key exists.
+   * Raises NotFoundError if the key doesn't exist.
+   * Useful for benchmarking to check if two keys deduplicated to the same object.
+   */
+  py::bytes GetObjectId(const std::string& key) {
+    EnsureOpen();
+    std::string object_id;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->GetObjectId(key, &object_id);
+    }
+    CheckStatusNotFound(status, key);
+    // Return as bytes to avoid UTF-8 decoding errors (object IDs are binary hashes)
+    return py::bytes(object_id);
+  }
+
+  /**
    * Close the store.
    */
   void Close() {
@@ -488,6 +507,21 @@ void BindStore(py::module_& m) {
 
       // Lifecycle
       .def("flush", &PyStore::Flush, "Flush pending writes to disk.")
+      .def("get_object_id", &PyStore::GetObjectId, py::arg("key"),
+           R"doc(Get internal object ID for a key (returns bytes).
+
+           Used for benchmarking to check if two keys deduplicated to the same object.
+           Returns bytes to avoid UTF-8 decoding errors on binary hash values.
+
+           Args:
+               key: Key string
+
+           Returns:
+               Object ID as bytes
+
+           Raises:
+               NotFoundError: If key doesn't exist
+           )doc")
       .def("close", &PyStore::Close, "Close the store.")
 
       // Context manager

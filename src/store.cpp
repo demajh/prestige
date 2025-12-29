@@ -584,6 +584,20 @@ rocksdb::Status Store::Delete(std::string_view user_key) {
   return DeleteImpl(user_key);
 }
 
+rocksdb::Status Store::GetObjectId(std::string_view user_key, std::string* object_id_out) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+
+  // Look up the object ID from the user_key in the user_kv column family
+  rocksdb::ReadOptions ro;
+  std::string object_id;
+  rocksdb::Status s = db_->Get(ro, user_kv_cf_, rocksdb::Slice(user_key), &object_id);
+
+  if (s.ok()) {
+    *object_id_out = object_id;
+  }
+  return s;
+}
+
 void Store::EmitCacheMetrics() {
   if (!opt_.metrics) return;
 
