@@ -93,15 +93,6 @@ with prestige.open("./my_db") as store:
     print(f"Unique values: {store.count_unique_values()}")  # 1
 ```
 
-### CLI
-
-```bash
-./prestige_cli ./mydb put k1 "hello"
-./prestige_cli ./mydb put k2 "hello"  # Deduplicates
-./prestige_cli ./mydb get k1
-./prestige_cli ./mydb count           # 2 keys, 1 unique value
-```
-
 ### HTTP Server
 
 prestige can run as a standalone HTTP server exposing a REST API:
@@ -143,7 +134,6 @@ See [docs/server.md](docs/server.md) for full API reference and configuration op
 | [Architecture](docs/architecture.md) | How prestige works internally |
 | [API Reference](docs/api-reference.md) | Complete API documentation |
 | [Building](docs/building.md) | Build instructions and dependencies |
-| [CLI](docs/cli.md) | Command-line tool reference |
 | [HTTP Server](docs/server.md) | REST API server reference |
 | [Python Bindings](docs/python-bindings.md) | Python API reference and examples |
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
