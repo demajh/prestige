@@ -1,0 +1,12 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: prestige_uvs
+Description: Content-deduplicated key-value store with exact and semantic dedup
+URL: https://github.com/demajh/prestige
+Version: 0.1.0
+Requires: rocksdb
+Libs: -L${libdir} -lprestige_uvs
+Cflags: -I${includedir}

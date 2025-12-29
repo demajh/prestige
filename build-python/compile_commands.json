@@ -1,0 +1,44 @@
+[
+{
+  "directory": "/Users/demajh/prestige/build-python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++  -I/Users/demajh/prestige/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -Wno-c++20-extensions -o CMakeFiles/prestige_uvs.dir/src/store.cpp.o -c /Users/demajh/prestige/src/store.cpp",
+  "file": "/Users/demajh/prestige/src/store.cpp",
+  "output": "CMakeFiles/prestige_uvs.dir/src/store.cpp.o"
+},
+{
+  "directory": "/Users/demajh/prestige/build-python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++  -I/Users/demajh/prestige/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -Wno-c++20-extensions -o CMakeFiles/prestige_uvs.dir/src/normalize.cpp.o -c /Users/demajh/prestige/src/normalize.cpp",
+  "file": "/Users/demajh/prestige/src/normalize.cpp",
+  "output": "CMakeFiles/prestige_uvs.dir/src/normalize.cpp.o"
+},
+{
+  "directory": "/Users/demajh/prestige/build-python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++  -I/Users/demajh/prestige/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -Wno-c++20-extensions -o CMakeFiles/prestige_uvs.dir/src/shutdown.cpp.o -c /Users/demajh/prestige/src/shutdown.cpp",
+  "file": "/Users/demajh/prestige/src/shutdown.cpp",
+  "output": "CMakeFiles/prestige_uvs.dir/src/shutdown.cpp.o"
+},
+{
+  "directory": "/Users/demajh/prestige/build-python/python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++ -D_prestige_EXPORTS -I/Users/demajh/prestige/python/../include -I/Users/demajh/prestige/python/src -I/Users/demajh/prestige/include -isystem /opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12/include/python3.12 -isystem /opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -fvisibility=hidden -Wno-c++20-extensions -flto -o CMakeFiles/_prestige.dir/src/bindings.cpp.o -c /Users/demajh/prestige/python/src/bindings.cpp",
+  "file": "/Users/demajh/prestige/python/src/bindings.cpp",
+  "output": "python/CMakeFiles/_prestige.dir/src/bindings.cpp.o"
+},
+{
+  "directory": "/Users/demajh/prestige/build-python/python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++ -D_prestige_EXPORTS -I/Users/demajh/prestige/python/../include -I/Users/demajh/prestige/python/src -I/Users/demajh/prestige/include -isystem /opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12/include/python3.12 -isystem /opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -fvisibility=hidden -Wno-c++20-extensions -flto -o CMakeFiles/_prestige.dir/src/exceptions.cpp.o -c /Users/demajh/prestige/python/src/exceptions.cpp",
+  "file": "/Users/demajh/prestige/python/src/exceptions.cpp",
+  "output": "python/CMakeFiles/_prestige.dir/src/exceptions.cpp.o"
+},
+{
+  "directory": "/Users/demajh/prestige/build-python/python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++ -D_prestige_EXPORTS -I/Users/demajh/prestige/python/../include -I/Users/demajh/prestige/python/src -I/Users/demajh/prestige/include -isystem /opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12/include/python3.12 -isystem /opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -fvisibility=hidden -Wno-c++20-extensions -flto -o CMakeFiles/_prestige.dir/src/options_bindings.cpp.o -c /Users/demajh/prestige/python/src/options_bindings.cpp",
+  "file": "/Users/demajh/prestige/python/src/options_bindings.cpp",
+  "output": "python/CMakeFiles/_prestige.dir/src/options_bindings.cpp.o"
+},
+{
+  "directory": "/Users/demajh/prestige/build-python/python",
+  "command": "/Library/Developer/CommandLineTools/usr/bin/c++ -D_prestige_EXPORTS -I/Users/demajh/prestige/python/../include -I/Users/demajh/prestige/python/src -I/Users/demajh/prestige/include -isystem /opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12/include/python3.12 -isystem /opt/homebrew/include -isystem /opt/homebrew/Cellar/openssl@3/3.5.0/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.0.sdk -fPIC -fvisibility=hidden -Wno-c++20-extensions -flto -o CMakeFiles/_prestige.dir/src/store_bindings.cpp.o -c /Users/demajh/prestige/python/src/store_bindings.cpp",
+  "file": "/Users/demajh/prestige/python/src/store_bindings.cpp",
+  "output": "python/CMakeFiles/_prestige.dir/src/store_bindings.cpp.o"
+}
+]

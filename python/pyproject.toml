@@ -1,0 +1,77 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+    "pybind11>=2.10.0",
+    "cmake>=3.16",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prestige"
+version = "0.1.0"
+description = "Content-deduplicated key-value store with optional semantic deduplication"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Prestige Authors"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+]
+keywords = ["key-value", "deduplication", "cache", "rocksdb", "semantic", "embeddings"]
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-xdist>=3.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
+docs = [
+    "sphinx>=6.0",
+    "sphinx-rtd-theme>=1.0",
+]
+observability = [
+    "prometheus-client>=0.16",
+    "opentelemetry-api>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/demajh/prestige"
+Documentation = "https://prestige.readthedocs.io"
+Repository = "https://github.com/demajh/prestige"
+
+[tool.setuptools]
+packages = ["prestige"]
+package-dir = {"" = "."}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"

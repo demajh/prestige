@@ -28,6 +28,7 @@ option(PRESTIGE_BUILD_EXAMPLES "Build examples" ON)
 option(PRESTIGE_BUILD_TESTS "Build unit tests" OFF)
 option(PRESTIGE_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 option(PRESTIGE_BUILD_SERVER "Build HTTP server (requires Drogon)" OFF)
+option(PRESTIGE_BUILD_PYTHON "Build Python bindings (requires pybind11)" OFF)
 option(PRESTIGE_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(PRESTIGE_ENABLE_SEMANTIC "Enable semantic deduplication (requires ONNX Runtime)" OFF)
 option(PRESTIGE_USE_FAISS "Enable FAISS backend for semantic dedup (requires FAISS)" OFF)
@@ -421,6 +422,11 @@ if(PRESTIGE_BUILD_BENCHMARKS)
             --benchmark_out_format=json
     COMMENT "Running benchmarks for comparison..."
   )
+endif()
+
+# --- Python Bindings ---
+if(PRESTIGE_BUILD_PYTHON)
+  add_subdirectory(python)
 endif()
 
 # --- Code Quality Targets ---
