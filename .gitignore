@@ -43,3 +43,18 @@ install_manifest.txt
 *.tar.gz
 *.zip
 pkg/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+.venv/
+venv/
+*.pth
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/

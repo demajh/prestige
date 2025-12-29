@@ -88,9 +88,19 @@ elseif(UNIX)
 endif()
 
 # Set output directory for development builds
-set_target_properties(_prestige PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/prestige
-)
+# Use CMAKE_LIBRARY_OUTPUT_DIRECTORY if specified (e.g., by setup.py),
+# otherwise default to source directory for development
+if(CMAKE_LIBRARY_OUTPUT_DIRECTORY)
+    # Let setup.py control the output directory
+    set_target_properties(_prestige PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+    )
+else()
+    # Development build - output to source directory
+    set_target_properties(_prestige PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/prestige
+    )
+endif()
 
 # Install target
 install(TARGETS _prestige
