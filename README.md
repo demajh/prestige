@@ -155,7 +155,6 @@ See [docs/server.md](docs/server.md) for full API reference and configuration op
 
 - End-to-end RAG examples + benchmark harness
 - Public embedding-cache functions: `GetEmbedding*`, `PutEmbedding*`, and metadata access (dims/dtype/model fingerprint), ideally via an `EmbeddingCache` wrapper atop the generic store.
-- Python bindings & integrations: a pip-installable package (wheels), plus LangChain/LlamaIndex adapters and minimal "drop-in cached embeddings" examples.
 - Concurrency: "inflight" reservation/lease support so multiple workers don't double-embed the same missing chunk.
 - Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (and batch variants for dedup-key operations) to amortize transaction cost and match embedding-provider batching.
 - Model/version-aware cache keys + binary embedding format + metadata (dims/dtype/etc.), and a configurable "bring your own embedder" interface so users can plug in OpenAI/Cohere/local/ONNX/etc.
