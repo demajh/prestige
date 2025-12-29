@@ -35,7 +35,9 @@ void BindOptions(py::module_& m) {
       .value("MINILM", SemanticModel::kMiniLM,
              "all-MiniLM-L6-v2 (384 dimensions)")
       .value("BGE_SMALL", SemanticModel::kBGESmall,
-             "BGE-small-en-v1.5 (384 dimensions)");
+             "BGE-small-en-v1.5 (384 dimensions)")
+      .value("BGE_LARGE", SemanticModel::kBGELarge,
+             "BGE-large-en-v1.5 (1024 dimensions)");
 
   // SemanticIndexType enum
   py::enum_<SemanticIndexType>(m, "SemanticIndexType", "Vector index backend")

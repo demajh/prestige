@@ -101,7 +101,10 @@ class SemanticDedupBenchmark:
             options.semantic_model_path = str(self._get_model_path())
 
             # Set model type based on model name
-            if "bge" in self.config.embedding_model.lower():
+            model_name = self.config.embedding_model.lower()
+            if "bge-large" in model_name:
+                options.semantic_model_type = prestige.SemanticModel.BGE_LARGE
+            elif "bge" in model_name:
                 options.semantic_model_type = prestige.SemanticModel.BGE_SMALL
             else:
                 options.semantic_model_type = prestige.SemanticModel.MINILM

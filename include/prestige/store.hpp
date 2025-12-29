@@ -70,7 +70,8 @@ enum class DedupMode {
 /** Supported embedding models for semantic dedup. */
 enum class SemanticModel {
   kMiniLM,    // all-MiniLM-L6-v2 (384 dimensions)
-  kBGESmall   // BGE-small-en-v1.5 (384 dimensions)
+  kBGESmall,  // BGE-small-en-v1.5 (384 dimensions)
+  kBGELarge   // BGE-large-en-v1.5 (1024 dimensions)
 };
 
 /** Vector index backend for semantic similarity search. */
@@ -212,7 +213,7 @@ struct Options {
   SemanticIndexType semantic_index_type = SemanticIndexType::kHNSW;
 
   // Number of nearest neighbors to retrieve during search
-  int semantic_search_k = 10;
+  int semantic_search_k = 50;
 
   // Auto-save vector index every N inserts (0 = disabled, save only on Close)
   int semantic_index_save_interval = 1000;
@@ -220,7 +221,7 @@ struct Options {
   // HNSW-specific parameters (when semantic_index_type == kHNSW)
   int hnsw_m = 16;                // Max connections per node
   int hnsw_ef_construction = 200; // Build-time search depth
-  int hnsw_ef_search = 50;        // Query-time search depth
+  int hnsw_ef_search = 100;       // Query-time search depth
 
   // FAISS-specific parameters (when semantic_index_type == kFAISS)
   int faiss_nlist = 100;          // Number of IVF clusters

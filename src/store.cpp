@@ -251,11 +251,21 @@ rocksdb::Status Store::Open(const std::string& db_path,
     } else {
       // Create ONNX embedder from model path
       std::string embedder_error;
+      internal::EmbedderModelType embedder_type;
+      switch (opt.semantic_model_type) {
+        case SemanticModel::kMiniLM:
+          embedder_type = internal::EmbedderModelType::kMiniLM;
+          break;
+        case SemanticModel::kBGESmall:
+          embedder_type = internal::EmbedderModelType::kBGESmall;
+          break;
+        case SemanticModel::kBGELarge:
+          embedder_type = internal::EmbedderModelType::kBGELarge;
+          break;
+      }
       store->embedder_ = internal::Embedder::Create(
           opt.semantic_model_path,
-          opt.semantic_model_type == SemanticModel::kMiniLM
-              ? internal::EmbedderModelType::kMiniLM
-              : internal::EmbedderModelType::kBGESmall,
+          embedder_type,
           &embedder_error);
 
       if (!store->embedder_) {

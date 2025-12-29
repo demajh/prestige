@@ -19,6 +19,15 @@ MODEL_REGISTRY = {
         "model_size_mb": 133,
         "description": "BGE-small English v1.5 (384 dims)",
     },
+    "bge-large": {
+        "model_file": "model.onnx",
+        "vocab_file": "vocab.txt",
+        "hf_repo": "BAAI/bge-large-en-v1.5",
+        "model_url": "https://huggingface.co/BAAI/bge-large-en-v1.5/resolve/main/onnx/model.onnx",
+        "vocab_url": "https://huggingface.co/BAAI/bge-large-en-v1.5/resolve/main/vocab.txt",
+        "model_size_mb": 1340,
+        "description": "BGE-large English v1.5 (1024 dims)",
+    },
     "minilm": {
         "model_file": "model.onnx",
         "vocab_file": "vocab.txt",

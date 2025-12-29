@@ -17,7 +17,8 @@ struct EmbeddingResult {
 // Supported model types
 enum class EmbedderModelType {
   kMiniLM,    // all-MiniLM-L6-v2 (384 dimensions)
-  kBGESmall   // BGE-small-en-v1.5 (384 dimensions)
+  kBGESmall,  // BGE-small-en-v1.5 (384 dimensions)
+  kBGELarge   // BGE-large-en-v1.5 (1024 dimensions)
 };
 
 // ONNX-based text embedder
@@ -38,7 +39,7 @@ class Embedder {
   // Returns normalized embedding vector (L2 norm = 1)
   virtual EmbeddingResult Embed(std::string_view text) const = 0;
 
-  // Get embedding dimension (384 for supported models)
+  // Get embedding dimension (384 for MiniLM/BGE-small, 1024 for BGE-large)
   virtual size_t Dimension() const = 0;
 
   // Get model type

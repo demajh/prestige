@@ -81,8 +81,22 @@ class OnnxEmbedder : public Embedder {
     EmbeddingResult result;
 
     try {
+      // For BGE models, prepend instruction prefix for better accuracy
+      // See: https://huggingface.co/BAAI/bge-small-en-v1.5
+      std::string prefixed_text;
+      std::string_view text_to_embed = text;
+      if (model_type_ == EmbedderModelType::kBGESmall ||
+          model_type_ == EmbedderModelType::kBGELarge) {
+        static constexpr std::string_view kBGEPrefix =
+            "Represent this sentence for searching relevant passages: ";
+        prefixed_text.reserve(kBGEPrefix.size() + text.size());
+        prefixed_text.append(kBGEPrefix);
+        prefixed_text.append(text);
+        text_to_embed = prefixed_text;
+      }
+
       // Tokenize the input text using WordPiece tokenizer
-      TokenizerResult tokens = tokenizer_->Tokenize(text, 512);
+      TokenizerResult tokens = tokenizer_->Tokenize(text_to_embed, 512);
       if (!tokens.success) {
         result.error_message = "Tokenization failed: " + tokens.error_message;
         return result;
@@ -253,7 +267,17 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
     return nullptr;
   }
 
-  size_t dimension = 384;  // Both MiniLM and BGE-small use 384 dimensions
+  // Determine embedding dimension based on model type
+  size_t dimension;
+  switch (type) {
+    case EmbedderModelType::kMiniLM:
+    case EmbedderModelType::kBGESmall:
+      dimension = 384;
+      break;
+    case EmbedderModelType::kBGELarge:
+      dimension = 1024;
+      break;
+  }
 
   auto embedder = std::make_unique<OnnxEmbedder>(type, dimension);
   if (!embedder->Initialize(model_path, vocab_path, error_out)) {
