@@ -106,8 +106,12 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e python/
           pip install -r benchmarks/semantic_dedup/requirements.txt
+
+      - name: Install Prestige Python bindings with semantic support
+        run: |
+          cd python
+          PRESTIGE_ENABLE_SEMANTIC=ON pip install -e .
 
       - name: Download embedding model
         run: |
