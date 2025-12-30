@@ -43,7 +43,7 @@ from ._prestige import (
 
 # Conditional imports for semantic features
 if SEMANTIC_AVAILABLE:
-    from ._prestige import SemanticModel, SemanticIndexType
+    from ._prestige import SemanticModel, SemanticIndexType, SemanticPooling
 
 
 def open(path: str, options: Options = None, **kwargs) -> Store:
@@ -113,4 +113,4 @@ __all__ = [
 
 # Add semantic types to __all__ if available
 if SEMANTIC_AVAILABLE:
-    __all__.extend(["SemanticModel", "SemanticIndexType"])
+    __all__.extend(["SemanticModel", "SemanticIndexType", "SemanticPooling"])

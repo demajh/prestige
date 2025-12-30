@@ -21,6 +21,12 @@ enum class EmbedderModelType {
   kBGELarge   // BGE-large-en-v1.5 (1024 dimensions)
 };
 
+// Pooling strategy for transformer output
+enum class EmbedderPooling {
+  kMean,      // Mean pooling over sequence tokens (default)
+  kCLS        // Use [CLS] token output (index 0)
+};
+
 // ONNX-based text embedder
 class Embedder {
  public:
@@ -29,11 +35,13 @@ class Embedder {
   // Factory: load model from ONNX file
   // Vocabulary file (vocab.txt) is auto-detected in the same directory as the model.
   // num_threads: 0 = use all available cores, >0 = use specified number of threads
+  // pooling: mean or CLS pooling for sequence output
   // Returns nullptr on failure, sets error_out if provided
   static std::unique_ptr<Embedder> Create(
       const std::string& model_path,
       EmbedderModelType type,
       int num_threads = 0,
+      EmbedderPooling pooling = EmbedderPooling::kMean,
       std::string* error_out = nullptr);
 
   // Compute embedding for text input

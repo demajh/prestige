@@ -45,6 +45,13 @@ void BindOptions(py::module_& m) {
              "hnswlib graph-based (recommended)")
       .value("FAISS", SemanticIndexType::kFAISS,
              "FAISS IVF+PQ (large scale)");
+
+  // SemanticPooling enum
+  py::enum_<SemanticPooling>(m, "SemanticPooling", "Pooling strategy for embeddings")
+      .value("MEAN", SemanticPooling::kMean,
+             "Mean pooling over sequence (default)")
+      .value("CLS", SemanticPooling::kCLS,
+             "CLS token pooling (first token)");
 #endif
 
   // Options class
@@ -108,6 +115,10 @@ void BindOptions(py::module_& m) {
                      "Nearest neighbors to search (default: 50)")
       .def_readwrite("semantic_num_threads", &Options::semantic_num_threads,
                      "ONNX inference threads (0 = all cores, default: 0)")
+      .def_readwrite("semantic_pooling", &Options::semantic_pooling,
+                     "Pooling strategy (default: MEAN)")
+      .def_readwrite("semantic_verify_exact", &Options::semantic_verify_exact,
+                     "Verify candidates with exact cosine (default: true)")
       .def_readwrite("semantic_index_save_interval",
                      &Options::semantic_index_save_interval,
                      "Auto-save interval in inserts (default: 1000)")

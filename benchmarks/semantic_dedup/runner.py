@@ -31,6 +31,8 @@ class BenchmarkConfig:
     embedding_model: str = "bge-small"
     batch_size: int = 100
     verbose: bool = True
+    pooling: str = "mean"  # "mean" or "cls"
+    sample_size: Optional[int] = None  # Number of pairs to sample (None = use all)
 
 
 class SemanticDedupBenchmark:
@@ -57,6 +59,13 @@ class SemanticDedupBenchmark:
             print(f"\nLoading dataset: {self.config.dataset_config.name}")
 
         df = self.dataset_loader.load_dataset(self.config.dataset_config)
+
+        # Sample if requested
+        original_size = len(df)
+        if self.config.sample_size is not None and self.config.sample_size < len(df):
+            df = df.sample(n=self.config.sample_size, random_state=42)
+            if self.config.verbose:
+                print(f"Sampled {len(df)} pairs from {original_size} total")
 
         if self.config.verbose:
             print(f"Dataset size: {len(df)} pairs")
@@ -108,6 +117,12 @@ class SemanticDedupBenchmark:
                 options.semantic_model_type = prestige.SemanticModel.BGE_SMALL
             else:
                 options.semantic_model_type = prestige.SemanticModel.MINILM
+
+            # Set pooling strategy
+            if self.config.pooling.lower() == "cls":
+                options.semantic_pooling = prestige.SemanticPooling.CLS
+            else:
+                options.semantic_pooling = prestige.SemanticPooling.MEAN
 
             store = prestige.Store.open(str(store_path), options)
 

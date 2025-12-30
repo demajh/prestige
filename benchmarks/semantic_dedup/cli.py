@@ -78,6 +78,18 @@ def cli():
     is_flag=True,
     help="Only generate JSON output (skip HTML)",
 )
+@click.option(
+    "--pooling",
+    type=click.Choice(["mean", "cls"], case_sensitive=False),
+    default="mean",
+    help="Pooling strategy: mean or cls (default: mean)",
+)
+@click.option(
+    "--sample",
+    type=int,
+    default=None,
+    help="Sample N pairs from dataset (default: use all)",
+)
 def run(
     datasets: str,
     thresholds: str,
@@ -87,6 +99,8 @@ def run(
     batch_size: int,
     quiet: bool,
     json_only: bool,
+    pooling: str,
+    sample: Optional[int],
 ):
     """Run semantic deduplication benchmarks.
 
@@ -152,6 +166,8 @@ def run(
             embedding_model=model,
             batch_size=batch_size,
             verbose=not quiet,
+            pooling=pooling,
+            sample_size=sample,
         )
 
         # Run benchmark

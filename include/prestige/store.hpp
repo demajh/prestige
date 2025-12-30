@@ -80,6 +80,12 @@ enum class SemanticIndexType {
   kFAISS     // FAISS IVF+PQ - for large scale / memory constrained
 };
 
+/** Pooling strategy for transformer embeddings. */
+enum class SemanticPooling {
+  kMean,      // Mean pooling over sequence (default, good for most models)
+  kCLS        // Use [CLS] token output (better for some retrieval models)
+};
+
 /**
  * Options for the prestige unique value store.
  *
@@ -217,6 +223,15 @@ struct Options {
 
   // Number of threads for ONNX embedding inference (0 = use all available cores)
   int semantic_num_threads = 0;
+
+  // Pooling strategy for transformer output
+  SemanticPooling semantic_pooling = SemanticPooling::kMean;
+
+  // Verify ANN candidates with exact cosine similarity.
+  // When true, loads stored embeddings and computes exact dot product
+  // instead of relying on approximate HNSW distances. More accurate
+  // but slightly slower. Recommended: true.
+  bool semantic_verify_exact = true;
 
   // Auto-save vector index every N inserts (0 = disabled, save only on Close)
   int semantic_index_save_interval = 1000;

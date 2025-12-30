@@ -263,10 +263,17 @@ rocksdb::Status Store::Open(const std::string& db_path,
           embedder_type = internal::EmbedderModelType::kBGELarge;
           break;
       }
+      // Convert pooling option
+      internal::EmbedderPooling pooling_type = internal::EmbedderPooling::kMean;
+      if (opt.semantic_pooling == SemanticPooling::kCLS) {
+        pooling_type = internal::EmbedderPooling::kCLS;
+      }
+
       store->embedder_ = internal::Embedder::Create(
           opt.semantic_model_path,
           embedder_type,
           opt.semantic_num_threads,
+          pooling_type,
           &embedder_error);
 
       if (!store->embedder_) {
@@ -1725,19 +1732,59 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
                 static_cast<uint64_t>(candidates.size()));
 
   // Check candidates for similarity match
-  // L2 distance for normalized vectors: d = 2 * (1 - cos_sim)
-  // So cos_sim = 1 - d/2
-  // We want cos_sim >= threshold, which means d <= 2 * (1 - threshold)
-  float max_l2_dist = 2.0f * (1.0f - opt_.semantic_threshold);
   std::string matched_obj_id;
 
-  for (const auto& candidate : candidates) {
-    if (candidate.distance <= max_l2_dist) {
-      // Found a semantic match
-      matched_obj_id = candidate.object_id;
-      dedup_hit_final = true;
-      EmitCounter(opt_, "prestige.semantic.hit_total", 1);
-      break;
+  if (opt_.semantic_verify_exact) {
+    // Exact verification: load stored embeddings and compute exact cosine similarity.
+    // This is more accurate than relying on approximate HNSW distances.
+    rocksdb::ReadOptions ro_snap;
+
+    for (const auto& candidate : candidates) {
+      // Load stored embedding for this candidate
+      std::string stored_embedding_bytes;
+      rocksdb::Status s = db_->Get(ro_snap, embeddings_cf_,
+                                   rocksdb::Slice(candidate.object_id),
+                                   &stored_embedding_bytes);
+      if (!s.ok()) {
+        continue;  // Embedding not found (possibly deleted), skip candidate
+      }
+
+      // Parse stored embedding
+      size_t dim = embedding.size();
+      if (stored_embedding_bytes.size() != dim * sizeof(float)) {
+        continue;  // Dimension mismatch, skip
+      }
+      const float* stored = reinterpret_cast<const float*>(stored_embedding_bytes.data());
+
+      // Compute exact cosine similarity (dot product for normalized vectors)
+      float cos_sim = 0.0f;
+      for (size_t i = 0; i < dim; ++i) {
+        cos_sim += embedding[i] * stored[i];
+      }
+
+      if (cos_sim >= opt_.semantic_threshold) {
+        // Found a semantic match with exact verification
+        matched_obj_id = candidate.object_id;
+        dedup_hit_final = true;
+        EmitCounter(opt_, "prestige.semantic.hit_total", 1);
+        EmitCounter(opt_, "prestige.semantic.exact_verified", 1);
+        break;
+      }
+    }
+  } else {
+    // Approximate verification: use HNSW L2 distance (L2 squared for hnswlib)
+    // L2² for normalized vectors: d² = 2 * (1 - cos_sim)
+    // We want cos_sim >= threshold, which means d² <= 2 * (1 - threshold)
+    float max_l2_sq = 2.0f * (1.0f - opt_.semantic_threshold);
+
+    for (const auto& candidate : candidates) {
+      if (candidate.distance <= max_l2_sq) {
+        // Found a semantic match (approximate)
+        matched_obj_id = candidate.object_id;
+        dedup_hit_final = true;
+        EmitCounter(opt_, "prestige.semantic.hit_total", 1);
+        break;
+      }
     }
   }
 
@@ -1835,6 +1882,9 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
           objects_cf_, rocksdb::Slice(obj_id),
           rocksdb::Slice(value_bytes.data(), value_bytes.size()));
       if (!s.ok()) return finish(s);
+
+      // Update total store size
+      total_store_bytes_.fetch_add(value_bytes.size());
 
       // Store embedding
       s = txn->Put(embeddings_cf_, rocksdb::Slice(obj_id),

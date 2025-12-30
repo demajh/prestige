@@ -15,10 +15,12 @@ namespace prestige::internal {
 
 class OnnxEmbedder : public Embedder {
  public:
-  OnnxEmbedder(EmbedderModelType type, size_t dimension, int num_threads)
+  OnnxEmbedder(EmbedderModelType type, size_t dimension, int num_threads,
+               EmbedderPooling pooling)
       : model_type_(type),
         dimension_(dimension),
         num_threads_(num_threads),
+        pooling_(pooling),
         env_(ORT_LOGGING_LEVEL_WARNING, "prestige_embedder"),
         memory_info_(Ort::MemoryInfo::CreateCpu(
             OrtAllocatorType::OrtArenaAllocator,
@@ -150,7 +152,7 @@ class OnnxEmbedder : public Embedder {
       // or [batch_size, hidden_size] for pooled output
       float* output_data = output_tensor.GetTensorMutableData<float>();
 
-      // Mean pooling over sequence dimension if needed
+      // Apply pooling strategy
       if (shape.size() == 3) {
         // [batch, seq_len, hidden]
         int64_t seq_len = shape[1];
@@ -158,22 +160,29 @@ class OnnxEmbedder : public Embedder {
 
         result.embedding.resize(hidden_size, 0.0f);
 
-        // Mean pooling with attention mask
-        for (int64_t i = 0; i < seq_len; ++i) {
-          if (i < static_cast<int64_t>(tokens.attention_mask.size()) &&
-              tokens.attention_mask[i]) {
-            for (int64_t j = 0; j < hidden_size; ++j) {
-              result.embedding[j] += output_data[i * hidden_size + j];
+        if (pooling_ == EmbedderPooling::kCLS) {
+          // CLS pooling: use first token ([CLS]) output
+          for (int64_t j = 0; j < hidden_size; ++j) {
+            result.embedding[j] = output_data[j];  // First token at offset 0
+          }
+        } else {
+          // Mean pooling with attention mask (default)
+          for (int64_t i = 0; i < seq_len; ++i) {
+            if (i < static_cast<int64_t>(tokens.attention_mask.size()) &&
+                tokens.attention_mask[i]) {
+              for (int64_t j = 0; j < hidden_size; ++j) {
+                result.embedding[j] += output_data[i * hidden_size + j];
+              }
             }
           }
-        }
 
-        // Divide by number of non-padding tokens
-        float mask_sum = static_cast<float>(std::count(
-            tokens.attention_mask.begin(), tokens.attention_mask.end(), 1));
-        if (mask_sum > 0) {
-          for (float& v : result.embedding) {
-            v /= mask_sum;
+          // Divide by number of non-padding tokens
+          float mask_sum = static_cast<float>(std::count(
+              tokens.attention_mask.begin(), tokens.attention_mask.end(), 1));
+          if (mask_sum > 0) {
+            for (float& v : result.embedding) {
+              v /= mask_sum;
+            }
           }
         }
       } else if (shape.size() == 2) {
@@ -216,6 +225,7 @@ class OnnxEmbedder : public Embedder {
   EmbedderModelType model_type_;
   size_t dimension_;
   int num_threads_;
+  EmbedderPooling pooling_;
 
   std::unique_ptr<WordPieceTokenizer> tokenizer_;
 
@@ -260,6 +270,7 @@ std::string FindVocabPath(const std::string& model_path) {
 std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
                                            EmbedderModelType type,
                                            int num_threads,
+                                           EmbedderPooling pooling,
                                            std::string* error_out) {
   // Auto-detect vocab path
   std::string vocab_path = FindVocabPath(model_path);
@@ -283,7 +294,7 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
       break;
   }
 
-  auto embedder = std::make_unique<OnnxEmbedder>(type, dimension, num_threads);
+  auto embedder = std::make_unique<OnnxEmbedder>(type, dimension, num_threads, pooling);
   if (!embedder->Initialize(model_path, vocab_path, error_out)) {
     return nullptr;
   }
@@ -300,6 +311,7 @@ namespace prestige::internal {
 std::unique_ptr<Embedder> Embedder::Create(const std::string& /*model_path*/,
                                            EmbedderModelType /*type*/,
                                            int /*num_threads*/,
+                                           EmbedderPooling /*pooling*/,
                                            std::string* error_out) {
   if (error_out) {
     *error_out =
