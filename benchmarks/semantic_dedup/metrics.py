@@ -1,7 +1,7 @@
 """Metrics calculation for semantic deduplication benchmarks."""
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List
 import numpy as np
 
 
@@ -136,81 +136,6 @@ def compute_accuracy(tp: int, tn: int, fp: int, fn: int) -> float:
     return (tp + tn) / total
 
 
-def compute_fpr_tpr(confusion_matrices: List[ConfusionMatrix]) -> Tuple[List[float], List[float]]:
-    """Compute False Positive Rate and True Positive Rate for ROC curve.
-
-    Args:
-        confusion_matrices: List of confusion matrices (one per threshold)
-
-    Returns:
-        Tuple of (FPR list, TPR list)
-    """
-    fprs = []
-    tprs = []
-
-    for cm in confusion_matrices:
-        # TPR = TP / (TP + FN) = Recall
-        tpr = compute_recall(cm.tp, cm.fn)
-
-        # FPR = FP / (FP + TN)
-        fpr = cm.fp / (cm.fp + cm.tn) if (cm.fp + cm.tn) > 0 else 0.0
-
-        tprs.append(tpr)
-        fprs.append(fpr)
-
-    return fprs, tprs
-
-
-def compute_auc(x: List[float], y: List[float]) -> float:
-    """Compute Area Under Curve using trapezoidal rule.
-
-    Args:
-        x: X coordinates (sorted)
-        y: Y coordinates
-
-    Returns:
-        AUC value
-    """
-    if len(x) != len(y) or len(x) < 2:
-        return 0.0
-
-    # Sort by x
-    points = sorted(zip(x, y))
-    x_sorted = [p[0] for p in points]
-    y_sorted = [p[1] for p in points]
-
-    # Trapezoidal integration
-    auc = 0.0
-    for i in range(len(x_sorted) - 1):
-        width = x_sorted[i + 1] - x_sorted[i]
-        height = (y_sorted[i] + y_sorted[i + 1]) / 2
-        auc += width * height
-
-    return auc
-
-
-def compute_pr_curve(confusion_matrices: List[ConfusionMatrix]) -> Tuple[List[float], List[float]]:
-    """Compute Precision-Recall curve.
-
-    Args:
-        confusion_matrices: List of confusion matrices (one per threshold)
-
-    Returns:
-        Tuple of (precision list, recall list)
-    """
-    precisions = []
-    recalls = []
-
-    for cm in confusion_matrices:
-        precision = compute_precision(cm.tp, cm.fp)
-        recall = compute_recall(cm.tp, cm.fn)
-
-        precisions.append(precision)
-        recalls.append(recall)
-
-    return precisions, recalls
-
-
 class MetricsAggregator:
     """Aggregates metrics across multiple thresholds."""
 
@@ -280,48 +205,3 @@ class MetricsAggregator:
             List of metrics dicts
         """
         return self.threshold_metrics
-
-    def compute_roc_auc(self) -> float:
-        """Compute ROC AUC across thresholds.
-
-        Returns:
-            ROC AUC score
-        """
-        if not self.threshold_metrics:
-            return 0.0
-
-        # Build confusion matrices
-        cms = [
-            ConfusionMatrix(
-                tp=m["tp"],
-                fp=m["fp"],
-                tn=m["tn"],
-                fn=m["fn"],
-            )
-            for m in self.threshold_metrics
-        ]
-
-        fprs, tprs = compute_fpr_tpr(cms)
-        return compute_auc(fprs, tprs)
-
-    def compute_pr_auc(self) -> float:
-        """Compute PR AUC across thresholds.
-
-        Returns:
-            PR AUC score
-        """
-        if not self.threshold_metrics:
-            return 0.0
-
-        cms = [
-            ConfusionMatrix(
-                tp=m["tp"],
-                fp=m["fp"],
-                tn=m["tn"],
-                fn=m["fn"],
-            )
-            for m in self.threshold_metrics
-        ]
-
-        precisions, recalls = compute_pr_curve(cms)
-        return compute_auc(recalls, precisions)

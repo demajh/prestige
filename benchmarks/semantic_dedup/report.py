@@ -17,8 +17,6 @@ class BenchmarkReport:
     thresholds: List[float]
     results: List[Dict]
     best_f1: Dict
-    roc_auc: float
-    pr_auc: float
     summary: Dict
 
 
@@ -44,8 +42,6 @@ class ReportGenerator:
         """
         all_results = self.results.get_all_results()
         best_f1 = self.results.get_best_f1()
-        roc_auc = self.results.compute_roc_auc()
-        pr_auc = self.results.compute_pr_auc()
 
         # Extract thresholds
         thresholds = [r["threshold"] for r in all_results]
@@ -57,8 +53,6 @@ class ReportGenerator:
             "best_f1": best_f1.get("f1_score", 0.0),
             "best_precision": best_f1.get("precision", 0.0),
             "best_recall": best_f1.get("recall", 0.0),
-            "roc_auc": roc_auc,
-            "pr_auc": pr_auc,
             "avg_latency_p50_ms": sum(r["latency_p50_ms"] for r in all_results) / len(all_results) if all_results else 0,
             "avg_latency_p95_ms": sum(r["latency_p95_ms"] for r in all_results) / len(all_results) if all_results else 0,
         }
@@ -69,8 +63,6 @@ class ReportGenerator:
             thresholds=thresholds,
             results=all_results,
             best_f1=best_f1,
-            roc_auc=roc_auc,
-            pr_auc=pr_auc,
             summary=summary,
         )
 
@@ -218,12 +210,12 @@ class ReportGenerator:
                 <div class="metric-value">{report.best_f1.get('threshold', 0.0):.2f}</div>
             </div>
             <div class="metric">
-                <div class="metric-label">ROC AUC</div>
-                <div class="metric-value">{report.roc_auc:.4f}</div>
+                <div class="metric-label">Best Precision</div>
+                <div class="metric-value">{report.best_f1.get('precision', 0.0):.4f}</div>
             </div>
             <div class="metric">
-                <div class="metric-label">PR AUC</div>
-                <div class="metric-value">{report.pr_auc:.4f}</div>
+                <div class="metric-label">Best Recall</div>
+                <div class="metric-value">{report.best_f1.get('recall', 0.0):.4f}</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Avg Latency P50</div>
@@ -317,18 +309,6 @@ class BaselineComparator:
                     "metric": "best_f1",
                     "current": current_f1,
                     "baseline": baseline_f1,
-                    "change_pct": pct_change,
-                })
-
-        # Compare ROC AUC
-        if self.baseline.roc_auc > 0:
-            pct_change = 100 * (self.current.roc_auc - self.baseline.roc_auc) / self.baseline.roc_auc
-
-            if pct_change < -threshold_pct:
-                regressions.append({
-                    "metric": "roc_auc",
-                    "current": self.current.roc_auc,
-                    "baseline": self.baseline.roc_auc,
                     "change_pct": pct_change,
                 })
 

@@ -15,9 +15,10 @@ namespace prestige::internal {
 
 class OnnxEmbedder : public Embedder {
  public:
-  OnnxEmbedder(EmbedderModelType type, size_t dimension)
+  OnnxEmbedder(EmbedderModelType type, size_t dimension, int num_threads)
       : model_type_(type),
         dimension_(dimension),
+        num_threads_(num_threads),
         env_(ORT_LOGGING_LEVEL_WARNING, "prestige_embedder"),
         memory_info_(Ort::MemoryInfo::CreateCpu(
             OrtAllocatorType::OrtArenaAllocator,
@@ -37,7 +38,8 @@ class OnnxEmbedder : public Embedder {
 
     try {
       Ort::SessionOptions session_options;
-      session_options.SetIntraOpNumThreads(1);
+      // num_threads_: 0 = use all available cores, >0 = use specified number
+      session_options.SetIntraOpNumThreads(num_threads_);
       session_options.SetGraphOptimizationLevel(
           GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
@@ -213,6 +215,7 @@ class OnnxEmbedder : public Embedder {
  private:
   EmbedderModelType model_type_;
   size_t dimension_;
+  int num_threads_;
 
   std::unique_ptr<WordPieceTokenizer> tokenizer_;
 
@@ -256,6 +259,7 @@ std::string FindVocabPath(const std::string& model_path) {
 
 std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
                                            EmbedderModelType type,
+                                           int num_threads,
                                            std::string* error_out) {
   // Auto-detect vocab path
   std::string vocab_path = FindVocabPath(model_path);
@@ -279,7 +283,7 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
       break;
   }
 
-  auto embedder = std::make_unique<OnnxEmbedder>(type, dimension);
+  auto embedder = std::make_unique<OnnxEmbedder>(type, dimension, num_threads);
   if (!embedder->Initialize(model_path, vocab_path, error_out)) {
     return nullptr;
   }
@@ -295,6 +299,7 @@ namespace prestige::internal {
 
 std::unique_ptr<Embedder> Embedder::Create(const std::string& /*model_path*/,
                                            EmbedderModelType /*type*/,
+                                           int /*num_threads*/,
                                            std::string* error_out) {
   if (error_out) {
     *error_out =

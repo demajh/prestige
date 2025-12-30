@@ -105,7 +105,9 @@ void BindOptions(py::module_& m) {
       .def_readwrite("semantic_index_type", &Options::semantic_index_type,
                      "Vector index backend (default: HNSW)")
       .def_readwrite("semantic_search_k", &Options::semantic_search_k,
-                     "Nearest neighbors to search (default: 10)")
+                     "Nearest neighbors to search (default: 50)")
+      .def_readwrite("semantic_num_threads", &Options::semantic_num_threads,
+                     "ONNX inference threads (0 = all cores, default: 0)")
       .def_readwrite("semantic_index_save_interval",
                      &Options::semantic_index_save_interval,
                      "Auto-save interval in inserts (default: 1000)")
@@ -116,7 +118,7 @@ void BindOptions(py::module_& m) {
       .def_readwrite("hnsw_ef_construction", &Options::hnsw_ef_construction,
                      "HNSW build-time search depth (default: 200)")
       .def_readwrite("hnsw_ef_search", &Options::hnsw_ef_search,
-                     "HNSW query-time search depth (default: 50)")
+                     "HNSW query-time search depth (default: 100)")
 
 #ifdef PRESTIGE_USE_FAISS
       // FAISS parameters

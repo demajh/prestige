@@ -215,6 +215,9 @@ struct Options {
   // Number of nearest neighbors to retrieve during search
   int semantic_search_k = 50;
 
+  // Number of threads for ONNX embedding inference (0 = use all available cores)
+  int semantic_num_threads = 0;
+
   // Auto-save vector index every N inserts (0 = disabled, save only on Close)
   int semantic_index_save_interval = 1000;
 

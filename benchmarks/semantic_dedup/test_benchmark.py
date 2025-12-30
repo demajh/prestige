@@ -15,7 +15,6 @@ from .metrics import (
     compute_recall,
     compute_f1,
     compute_accuracy,
-    compute_auc,
     MetricsAggregator,
 )
 from .dataset_loader import DatasetConfig, DatasetLoader
@@ -72,20 +71,6 @@ class TestMetrics(unittest.TestCase):
         """Test accuracy calculation."""
         self.assertEqual(compute_accuracy(10, 20, 5, 5), (10 + 20) / 40)
         self.assertEqual(compute_accuracy(0, 0, 0, 0), 0.0)
-
-    def test_auc_calculation(self):
-        """Test AUC calculation with trapezoidal rule."""
-        # Perfect classifier: (0,0) -> (0,1) -> (1,1)
-        x = [0.0, 0.0, 1.0]
-        y = [0.0, 1.0, 1.0]
-        auc = compute_auc(x, y)
-        self.assertAlmostEqual(auc, 1.0)
-
-        # Random classifier: (0,0) -> (1,1)
-        x = [0.0, 1.0]
-        y = [0.0, 1.0]
-        auc = compute_auc(x, y)
-        self.assertAlmostEqual(auc, 0.5)
 
     def test_benchmark_metrics_from_confusion_matrix(self):
         """Test BenchmarkMetrics creation from confusion matrix."""
@@ -307,8 +292,6 @@ class TestBaselineComparison(unittest.TestCase):
             thresholds=[0.9],
             results=[],
             best_f1={"f1_score": 0.9, "threshold": 0.9},
-            roc_auc=0.95,
-            pr_auc=0.93,
             summary={"avg_latency_p95_ms": 5.0},
         )
 
@@ -319,15 +302,13 @@ class TestBaselineComparison(unittest.TestCase):
             thresholds=[0.9],
             results=[],
             best_f1={"f1_score": 0.8, "threshold": 0.9},
-            roc_auc=0.90,
-            pr_auc=0.88,
             summary={"avg_latency_p95_ms": 5.0},
         )
 
         comparator = BaselineComparator(current, baseline)
         regressions = comparator.detect_regressions(threshold_pct=5.0)
 
-        # Should detect F1 and ROC_AUC regressions
+        # Should detect F1 regression
         self.assertGreater(len(regressions), 0)
 
         regression_metrics = [r["metric"] for r in regressions]
@@ -341,8 +322,6 @@ class TestBaselineComparison(unittest.TestCase):
             thresholds=[0.9],
             results=[],
             best_f1={"f1_score": 0.8, "threshold": 0.9},
-            roc_auc=0.85,
-            pr_auc=0.83,
             summary={"avg_latency_p95_ms": 5.0},
         )
 
@@ -353,8 +332,6 @@ class TestBaselineComparison(unittest.TestCase):
             thresholds=[0.9],
             results=[],
             best_f1={"f1_score": 0.9, "threshold": 0.9},
-            roc_auc=0.90,
-            pr_auc=0.88,
             summary={"avg_latency_p95_ms": 5.0},
         )
 

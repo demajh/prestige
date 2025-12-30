@@ -193,8 +193,8 @@ def run(
             name: {
                 "best_f1": report.best_f1.get("f1_score", 0.0),
                 "best_threshold": report.best_f1.get("threshold", 0.0),
-                "roc_auc": report.roc_auc,
-                "pr_auc": report.pr_auc,
+                "best_precision": report.best_f1.get("precision", 0.0),
+                "best_recall": report.best_f1.get("recall", 0.0),
             }
             for name, report in all_reports.items()
         }
@@ -213,7 +213,6 @@ def run(
             best = report.best_f1
             click.echo(f"  {name.upper()}:")
             click.echo(f"    Best F1: {best.get('f1_score', 0.0):.4f} (threshold={best.get('threshold', 0.0):.2f})")
-            click.echo(f"    ROC AUC: {report.roc_auc:.4f}")
 
 
 @cli.command()

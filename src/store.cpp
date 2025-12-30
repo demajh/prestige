@@ -266,6 +266,7 @@ rocksdb::Status Store::Open(const std::string& db_path,
       store->embedder_ = internal::Embedder::Create(
           opt.semantic_model_path,
           embedder_type,
+          opt.semantic_num_threads,
           &embedder_error);
 
       if (!store->embedder_) {

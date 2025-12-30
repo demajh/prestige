@@ -28,10 +28,12 @@ class Embedder {
 
   // Factory: load model from ONNX file
   // Vocabulary file (vocab.txt) is auto-detected in the same directory as the model.
+  // num_threads: 0 = use all available cores, >0 = use specified number of threads
   // Returns nullptr on failure, sets error_out if provided
   static std::unique_ptr<Embedder> Create(
       const std::string& model_path,
       EmbedderModelType type,
+      int num_threads = 0,
       std::string* error_out = nullptr);
 
   // Compute embedding for text input
