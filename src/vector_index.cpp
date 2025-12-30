@@ -103,11 +103,12 @@ class HNSWIndex : public VectorIndex {
       return {};
     }
 
-    std::vector<SearchResult> results;
-    results.reserve(k);
+    // Collect all candidates with their labels (for LRU update later)
+    std::vector<std::pair<hnswlib::labeltype, SearchResult>> candidates;
+    candidates.reserve(search_k);
 
-    // Extract results, filtering deleted items
-    while (!result.empty() && results.size() < static_cast<size_t>(k)) {
+    // Drain entire heap - searchKnn returns a max-heap, so top() gives farthest first
+    while (!result.empty()) {
       auto [distance, label] = result.top();
       result.pop();
 
@@ -118,14 +119,26 @@ class HNSWIndex : public VectorIndex {
 
       auto it = label_to_object_id_.find(label);
       if (it != label_to_object_id_.end()) {
-        results.push_back({it->second, distance});
-        // Update LRU on access (move to back of list)
-        UpdateLRULocked(label);
+        candidates.push_back({label, {it->second, distance}});
       }
     }
 
-    // Results come from priority queue (max-heap), so reverse for ascending order
-    std::reverse(results.begin(), results.end());
+    // Reverse to get nearest neighbors first (smallest distance)
+    std::reverse(candidates.begin(), candidates.end());
+
+    // Trim to k nearest
+    if (candidates.size() > static_cast<size_t>(k)) {
+      candidates.resize(k);
+    }
+
+    // Build final results and update LRU only for returned neighbors
+    std::vector<SearchResult> results;
+    results.reserve(candidates.size());
+    for (const auto& [label, sr] : candidates) {
+      results.push_back(sr);
+      UpdateLRULocked(label);
+    }
+
     return results;
   }
 

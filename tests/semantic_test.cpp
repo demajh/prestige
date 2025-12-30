@@ -180,17 +180,41 @@ TEST_F(SemanticTest, ThresholdAffectsDedup) {
     std::filesystem::create_directories(test_dir_);
   }
 
-  // Test with very low threshold (everything deduplicates)
+  // Test with low threshold and known-similar embeddings (should deduplicate)
   {
     auto* embedder = new prestige::testing::DeterministicEmbedder(384);
-    ASSERT_TRUE(OpenStore(0.0f, embedder).ok());
+
+    // Register embeddings with known high cosine similarity (~0.99)
+    // For threshold=0.5 (cos_sim >= 0.5), these should match
+    std::vector<float> emb1(384, 0.0f);
+    std::vector<float> emb2(384, 0.0f);
+    for (size_t i = 0; i < 384; ++i) {
+      emb1[i] = static_cast<float>(i) / 384.0f;
+      emb2[i] = emb1[i] + 0.01f;  // Very similar
+    }
+    // Normalize
+    float norm1 = 0.0f, norm2 = 0.0f;
+    for (size_t i = 0; i < 384; ++i) {
+      norm1 += emb1[i] * emb1[i];
+      norm2 += emb2[i] * emb2[i];
+    }
+    norm1 = std::sqrt(norm1);
+    norm2 = std::sqrt(norm2);
+    for (size_t i = 0; i < 384; ++i) {
+      emb1[i] /= norm1;
+      emb2[i] /= norm2;
+    }
+    embedder->RegisterEmbedding("first text", emb1);
+    embedder->RegisterEmbedding("second text", emb2);
+
+    ASSERT_TRUE(OpenStore(0.5f, embedder).ok());
 
     ASSERT_TRUE(store_->Put("key1", "first text").ok());
     ASSERT_TRUE(store_->Put("key2", "second text").ok());
 
     uint64_t unique_count = 0;
     ASSERT_TRUE(store_->CountUniqueValues(&unique_count).ok());
-    EXPECT_EQ(unique_count, 1u);  // Low threshold = more dedup
+    EXPECT_EQ(unique_count, 1u);  // Low threshold + similar embeddings = dedup
   }
 }
 
