@@ -98,6 +98,7 @@ if(PRESTIGE_ENABLE_SEMANTIC)
     src/embedder.cpp
     src/tokenizer.cpp
     src/vector_index.cpp
+    src/reranker.cpp
   )
 endif()
 
@@ -314,6 +315,7 @@ if(PRESTIGE_BUILD_TESTS)
     tests/cache_test.cpp
     tests/integration_test.cpp
     tests/semantic_test.cpp
+    tests/reranker_test.cpp
     tests/crash_test.cpp
   )
 

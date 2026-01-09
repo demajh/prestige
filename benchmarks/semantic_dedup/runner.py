@@ -33,6 +33,14 @@ class BenchmarkConfig:
     verbose: bool = True
     pooling: str = "mean"  # "mean" or "cls"
     sample_size: Optional[int] = None  # Number of pairs to sample (None = use all)
+    
+    # Reranker settings
+    enable_reranker: bool = False
+    reranker_model: str = "bge-reranker-base"
+    reranker_threshold: float = 0.8
+    reranker_top_k: int = 100
+    reranker_batch_size: int = 8
+    reranker_fallback: bool = True
 
 
 class SemanticDedupBenchmark:
@@ -124,6 +132,15 @@ class SemanticDedupBenchmark:
             else:
                 options.semantic_pooling = prestige.SemanticPooling.MEAN
 
+            # Configure reranker if enabled
+            if self.config.enable_reranker:
+                options.semantic_reranker_enabled = True
+                options.semantic_reranker_model_path = str(self._get_reranker_model_path())
+                options.semantic_reranker_threshold = self.config.reranker_threshold
+                options.semantic_reranker_top_k = self.config.reranker_top_k
+                options.semantic_reranker_batch_size = self.config.reranker_batch_size
+                options.semantic_reranker_fallback = self.config.reranker_fallback
+
             store = prestige.Store.open(str(store_path), options)
 
             # Initialize metrics
@@ -209,7 +226,8 @@ class SemanticDedupBenchmark:
             # Print summary
             if self.config.verbose:
                 metrics = BenchmarkMetrics.from_confusion_matrix(confusion_matrix)
-                print(f"\nResults for threshold {threshold}:")
+                reranker_status = " (with reranker)" if self.config.enable_reranker else ""
+                print(f"\nResults for threshold {threshold}{reranker_status}:")
                 print(f"  Precision: {metrics.precision:.4f}")
                 print(f"  Recall:    {metrics.recall:.4f}")
                 print(f"  F1 Score:  {metrics.f1_score:.4f}")
@@ -260,6 +278,45 @@ class SemanticDedupBenchmark:
             f"  - {models_dir}\n"
             f"Please download the model using:\n"
             f"  python -m benchmarks.semantic_dedup.models {model_dir_name}"
+        )
+
+    def _get_reranker_model_path(self) -> Path:
+        """Get path to reranker model.
+
+        Returns:
+            Path to reranker ONNX model file
+
+        Raises:
+            FileNotFoundError: If reranker model not found
+        """
+        # Check common reranker model locations
+        model_file = "model.onnx"
+        model_dir_name = self.config.reranker_model
+
+        # Check cache directory
+        cache_model = self.config.cache_dir / "models" / model_dir_name / model_file
+        if cache_model.exists():
+            return cache_model
+
+        # Check user cache
+        user_cache = Path.home() / ".cache" / "prestige" / "models" / model_dir_name / model_file
+        if user_cache.exists():
+            return user_cache
+
+        # Check models/ directory relative to project root
+        project_root = Path(__file__).parent.parent.parent
+        models_dir = project_root / "models" / model_dir_name / model_file
+        if models_dir.exists():
+            return models_dir
+
+        raise FileNotFoundError(
+            f"Reranker model not found: {model_dir_name}/{model_file}\n"
+            f"Searched locations:\n"
+            f"  - {cache_model}\n"
+            f"  - {user_cache}\n"
+            f"  - {models_dir}\n"
+            f"Please download the BGE reranker from Hugging Face:\n"
+            f"  https://huggingface.co/BAAI/bge-reranker-v2-m3"
         )
 
 

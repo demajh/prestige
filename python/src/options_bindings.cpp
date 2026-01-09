@@ -150,6 +150,29 @@ void BindOptions(py::module_& m) {
       .def_readwrite("semantic_compact_threshold",
                      &Options::semantic_compact_threshold,
                      "Compaction threshold (default: 10000)")
+      
+      // Reranker settings
+      .def_readwrite("semantic_reranker_enabled",
+                     &Options::semantic_reranker_enabled,
+                     "Enable two-stage retrieval with reranker (default: false)")
+      .def_readwrite("semantic_reranker_model_path",
+                     &Options::semantic_reranker_model_path,
+                     "Path to reranker ONNX model")
+      .def_readwrite("semantic_reranker_top_k",
+                     &Options::semantic_reranker_top_k,
+                     "Number of candidates for reranking (default: 100)")
+      .def_readwrite("semantic_reranker_threshold",
+                     &Options::semantic_reranker_threshold,
+                     "Reranker score threshold (default: 0.7)")
+      .def_readwrite("semantic_reranker_batch_size",
+                     &Options::semantic_reranker_batch_size,
+                     "Batch size for reranking (default: 8)")
+      .def_readwrite("semantic_reranker_num_threads",
+                     &Options::semantic_reranker_num_threads,
+                     "Threads for reranker inference (default: 0=all)")
+      .def_readwrite("semantic_reranker_fallback",
+                     &Options::semantic_reranker_fallback,
+                     "Fall back to embeddings if reranker fails (default: true)")
 #endif
 
       // Repr

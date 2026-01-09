@@ -90,6 +90,28 @@ def cli():
     default=None,
     help="Sample N pairs from dataset (default: use all)",
 )
+@click.option(
+    "--enable-reranker",
+    is_flag=True,
+    help="Enable two-stage retrieval with reranker for higher accuracy",
+)
+@click.option(
+    "--reranker-model",
+    default="bge-reranker-v2-m3",
+    help="Reranker model name (default: bge-reranker-v2-m3)",
+)
+@click.option(
+    "--reranker-threshold",
+    type=float,
+    default=0.8,
+    help="Reranker score threshold [0.0-1.0] (default: 0.8)",
+)
+@click.option(
+    "--reranker-top-k",
+    type=int,
+    default=100,
+    help="Number of candidates for reranking (default: 100)",
+)
 def run(
     datasets: str,
     thresholds: str,
@@ -101,6 +123,10 @@ def run(
     json_only: bool,
     pooling: str,
     sample: Optional[int],
+    enable_reranker: bool,
+    reranker_model: str,
+    reranker_threshold: float,
+    reranker_top_k: int,
 ):
     """Run semantic deduplication benchmarks.
 
@@ -140,7 +166,11 @@ def run(
         click.echo(f"Datasets: {', '.join(dataset_names)}")
         click.echo(f"Thresholds: {', '.join(map(str, threshold_values))}")
         click.echo(f"Output: {output}")
-        click.echo(f"Model: {model}")
+        click.echo(f"Embedding Model: {model}")
+        if enable_reranker:
+            click.echo(f"Reranker: {reranker_model}")
+            click.echo(f"Reranker Threshold: {reranker_threshold}")
+            click.echo(f"Reranker Top-K: {reranker_top_k}")
         click.echo("=" * 60)
 
     # Run benchmarks for each dataset
@@ -168,6 +198,10 @@ def run(
             verbose=not quiet,
             pooling=pooling,
             sample_size=sample,
+            enable_reranker=enable_reranker,
+            reranker_model=reranker_model,
+            reranker_threshold=reranker_threshold,
+            reranker_top_k=reranker_top_k,
         )
 
         # Run benchmark
@@ -347,6 +381,140 @@ def list_datasets():
             click.echo(f"  {name}: {config.source}")
         except ValueError:
             pass
+
+
+@cli.command()
+@click.option(
+    "--dataset", "-d", default="mrpc", help="Dataset to test (default: mrpc)"
+)
+@click.option(
+    "--threshold", "-t", type=float, default=0.85, help="Similarity threshold (default: 0.85)"
+)
+@click.option(
+    "--model", default="bge-small", help="Embedding model (default: bge-small)"
+)
+@click.option(
+    "--reranker-threshold", type=float, default=0.8, help="Reranker threshold (default: 0.8)"
+)
+@click.option(
+    "--cache-dir", type=click.Path(path_type=Path), default=None, help="Cache directory"
+)
+@click.option(
+    "--sample", type=int, default=500, help="Number of pairs to sample (default: 500)"
+)
+def compare_reranker(
+    dataset: str,
+    threshold: float,
+    model: str,
+    reranker_threshold: float,
+    cache_dir: Optional[Path],
+    sample: int,
+):
+    """Compare embeddings-only vs. reranker performance.
+    
+    Runs the same benchmark twice - once with embeddings only, 
+    once with reranker enabled - and compares the results.
+    
+    Example:
+    
+        python cli.py compare-reranker --dataset mrpc --sample 1000
+    """
+    if cache_dir is None:
+        cache_dir = Path.home() / ".cache" / "prestige" / "benchmarks"
+    
+    try:
+        dataset_config = get_dataset_config(dataset)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    
+    click.echo("=" * 70)
+    click.echo("Reranker Performance Comparison")
+    click.echo("=" * 70)
+    click.echo(f"Dataset: {dataset}")
+    click.echo(f"Sample size: {sample} pairs")
+    click.echo(f"Embedding model: {model}")
+    click.echo(f"Semantic threshold: {threshold}")
+    click.echo(f"Reranker threshold: {reranker_threshold}")
+    click.echo("=" * 70)
+    
+    results = {}
+    
+    # Test 1: Embeddings only
+    click.echo("\n[1/2] Testing embeddings-only approach...")
+    config_embeddings = BenchmarkConfig(
+        dataset_config=dataset_config,
+        thresholds=[threshold],
+        cache_dir=cache_dir,
+        embedding_model=model,
+        sample_size=sample,
+        verbose=False,
+        enable_reranker=False,
+    )
+    
+    benchmark = SemanticDedupBenchmark(config_embeddings)
+    results_embeddings = benchmark.run()
+    embeddings_result = results_embeddings.get_all_results()[0]
+    
+    # Test 2: With reranker
+    click.echo("\n[2/2] Testing with reranker...")
+    config_reranker = BenchmarkConfig(
+        dataset_config=dataset_config,
+        thresholds=[threshold], 
+        cache_dir=cache_dir,
+        embedding_model=model,
+        sample_size=sample,
+        verbose=False,
+        enable_reranker=True,
+        reranker_threshold=reranker_threshold,
+        reranker_top_k=100,
+    )
+    
+    benchmark = SemanticDedupBenchmark(config_reranker)
+    results_reranker = benchmark.run()
+    reranker_result = results_reranker.get_all_results()[0]
+    
+    # Compare results
+    click.echo("\n" + "=" * 70)
+    click.echo("COMPARISON RESULTS")
+    click.echo("=" * 70)
+    
+    metrics = ["precision", "recall", "f1_score", "accuracy"]
+    click.echo(f"{'Metric':<12} {'Embeddings':<12} {'Reranker':<12} {'Improvement':<12}")
+    click.echo("-" * 50)
+    
+    for metric in metrics:
+        emb_val = embeddings_result.get(metric, 0.0)
+        rer_val = reranker_result.get(metric, 0.0)
+        improvement = ((rer_val - emb_val) / emb_val * 100) if emb_val > 0 else 0
+        
+        click.echo(f"{metric:<12} {emb_val:<12.4f} {rer_val:<12.4f} {improvement:+.1f}%")
+    
+    # Performance comparison
+    emb_latency = embeddings_result.get("latency_p50_ms", 0)
+    rer_latency = reranker_result.get("latency_p50_ms", 0)
+    latency_overhead = ((rer_latency - emb_latency) / emb_latency * 100) if emb_latency > 0 else 0
+    
+    click.echo(f"\nLatency (p50):   {emb_latency:.1f}ms → {rer_latency:.1f}ms ({latency_overhead:+.1f}%)")
+    
+    dedup_emb = embeddings_result.get("dedup_ratio", 1.0)
+    dedup_rer = reranker_result.get("dedup_ratio", 1.0)
+    click.echo(f"Dedup ratio:     {dedup_emb:.2f}x → {dedup_rer:.2f}x")
+    
+    # Recommendation
+    f1_improvement = ((reranker_result.get("f1_score", 0) - embeddings_result.get("f1_score", 0)) 
+                     / embeddings_result.get("f1_score", 1) * 100)
+    
+    click.echo(f"\n{'='*70}")
+    if f1_improvement > 5:
+        click.echo("💡 RECOMMENDATION: Reranker provides significant accuracy improvement!")
+        click.echo(f"   F1 score improved by {f1_improvement:.1f}% with {latency_overhead:.1f}% latency overhead")
+    elif f1_improvement > 1:
+        click.echo("✅ RECOMMENDATION: Reranker provides moderate improvement")
+        click.echo(f"   Consider enabling for high-accuracy use cases")
+    else:
+        click.echo("⚖️  RECOMMENDATION: Marginal improvement, embeddings-only may be sufficient")
+        click.echo(f"   Reranker overhead ({latency_overhead:.1f}%) may not justify {f1_improvement:.1f}% gain")
 
 
 if __name__ == "__main__":

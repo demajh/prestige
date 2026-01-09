@@ -55,6 +55,8 @@ struct Tracer {
 namespace internal {
 class Embedder;
 class VectorIndex;
+class Reranker;
+struct SearchResult;  // From vector_index.hpp
 }  // namespace internal
 
 namespace testing {
@@ -258,6 +260,38 @@ struct Options {
   // Compaction rebuilds the index to reclaim memory from soft-deleted entries.
   // Set to 0 to disable automatic compaction.
   size_t semantic_compact_threshold = 10000;
+
+  // ---------------------------------------------------------------------------
+  // Reranker settings (only used when semantic_reranker_enabled = true)
+  // ---------------------------------------------------------------------------
+
+  // Enable two-stage retrieval with reranker for higher accuracy
+  bool semantic_reranker_enabled = false;
+
+  // Path to cross-encoder reranker model (e.g., BGE-reranker-v2-m3)
+  std::string semantic_reranker_model_path;
+
+  // Number of candidates to retrieve for reranking (higher = better recall, slower)
+  // This replaces semantic_search_k when reranker is enabled
+  int semantic_reranker_top_k = 100;
+
+  // Reranker score threshold [0.0, 1.0]
+  // Note: Reranker scores are on a different scale than cosine similarity
+  float semantic_reranker_threshold = 0.7f;
+
+  // Batch size for reranking multiple candidates (for efficiency)
+  int semantic_reranker_batch_size = 8;
+
+  // Number of threads for reranker ONNX inference (0 = use all cores)
+  int semantic_reranker_num_threads = 0;
+
+  // Fall back to embedding-based matching if reranker fails
+  bool semantic_reranker_fallback = true;
+
+  // Custom reranker for testing (optional)
+  // If provided, semantic_reranker_model_path is ignored
+  // The Store takes ownership of this pointer
+  internal::Reranker* custom_reranker = nullptr;
 };
 
 /**
@@ -472,8 +506,14 @@ class Store {
   rocksdb::ColumnFamilyHandle* vector_pending_cf_ = nullptr;  // WAL for vector index ops
   std::unique_ptr<internal::Embedder> embedder_;
   std::unique_ptr<internal::VectorIndex> vector_index_;
+  std::unique_ptr<internal::Reranker> reranker_;  // Optional reranker for two-stage retrieval
   std::string vector_index_path_;  // Path to vector index file
   uint64_t semantic_inserts_since_save_ = 0;  // For periodic index saves
+  
+  // Private helper for reranking candidates
+  std::string RerankCandidates(std::string_view query_text,
+                               const std::vector<internal::SearchResult>& candidates,
+                               float* best_score_out) const;
 #endif
 };
 

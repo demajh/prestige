@@ -37,6 +37,15 @@ MODEL_REGISTRY = {
         "model_size_mb": 90,
         "description": "MiniLM-L6-v2 (384 dims)",
     },
+    "bge-reranker-base": {
+        "model_file": "model.onnx",
+        "vocab_file": "vocab.txt", 
+        "hf_repo": "BAAI/bge-reranker-base",
+        "model_url": "https://huggingface.co/BAAI/bge-reranker-base/resolve/main/onnx/model.onnx",
+        "vocab_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/vocab.txt",  # Use compatible vocab
+        "model_size_mb": 279,
+        "description": "BGE-reranker-base cross-encoder",
+    },
 }
 
 

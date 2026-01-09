@@ -242,10 +242,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPRESTIGE_ENABLE_SEMANTIC=ON \
             -DPRESTIGE_BUILD_EXAMPLES=ON \
-            -DPRESTIGE_BUILD_TOOLS=ON
+            -DPRESTIGE_BUILD_TOOLS=ON \
+            -DPRESTIGE_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config Release -j$(nproc)
+
+      - name: Run semantic tests
+        run: |
+          cd build
+          # Run only semantic and reranker tests to avoid duplicating coverage
+          ctest --output-on-failure --timeout 300 -R "(semantic|reranker)"
 
   # =============================================================================
   # Server Build and Test

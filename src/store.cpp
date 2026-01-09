@@ -18,6 +18,7 @@
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 #include <prestige/embedder.hpp>
 #include <prestige/vector_index.hpp>
+#include <prestige/reranker.hpp>
 #endif
 
 namespace prestige {
@@ -302,6 +303,27 @@ rocksdb::Status Store::Open(const std::string& db_path,
     // Set max entries limit if specified (for memory safety)
     if (opt.semantic_max_index_entries > 0) {
       store->vector_index_->SetMaxEntries(opt.semantic_max_index_entries);
+    }
+
+    // Initialize reranker if enabled
+    if (opt.semantic_reranker_enabled) {
+      if (opt.custom_reranker) {
+        // Use provided custom reranker (takes ownership)
+        store->reranker_.reset(opt.custom_reranker);
+      } else if (!opt.semantic_reranker_model_path.empty()) {
+        // Create BGE reranker from model path
+        std::string reranker_error;
+        store->reranker_ = internal::CreateReranker(
+            opt.semantic_reranker_model_path,
+            opt.semantic_reranker_num_threads,
+            &reranker_error);
+        
+        if (!store->reranker_ && !opt.semantic_reranker_fallback) {
+          store->Close();
+          return rocksdb::Status::InvalidArgument(
+              "Failed to create reranker: " + reranker_error);
+        }
+      }
     }
 
     // Load existing index if present
@@ -1725,7 +1747,13 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
 
   // Search vector index for similar embeddings (outside transaction)
   const uint64_t search_start_us = prestige::internal::NowMicros();
-  auto candidates = vector_index_->Search(embedding, opt_.semantic_search_k);
+  
+  // If reranker is enabled, retrieve more candidates for better recall
+  int search_k = (opt_.semantic_reranker_enabled && reranker_) 
+                 ? opt_.semantic_reranker_top_k 
+                 : opt_.semantic_search_k;
+  
+  auto candidates = vector_index_->Search(embedding, search_k);
   EmitHistogram(opt_, "prestige.semantic.lookup_us",
                 prestige::internal::NowMicros() - search_start_us);
   EmitHistogram(opt_, "prestige.semantic.candidates_checked",
@@ -1733,8 +1761,26 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
 
   // Check candidates for similarity match
   std::string matched_obj_id;
-
-  if (opt_.semantic_verify_exact) {
+  float best_score = -1.0f;
+  
+  // Use reranker if enabled and available
+  if (opt_.semantic_reranker_enabled && reranker_ && !candidates.empty()) {
+    const uint64_t rerank_start_us = prestige::internal::NowMicros();
+    matched_obj_id = RerankCandidates(value_bytes, candidates, &best_score);
+    EmitHistogram(opt_, "prestige.semantic.rerank_us",
+                  prestige::internal::NowMicros() - rerank_start_us);
+    
+    if (!matched_obj_id.empty()) {
+      dedup_hit_final = true;
+      EmitCounter(opt_, "prestige.semantic.hit_total", 1);
+      EmitCounter(opt_, "prestige.semantic.reranker_hit", 1);
+    }
+  }
+  
+  // Fall back to embedding-based matching if reranker didn't find a match
+  // or if reranker is not enabled
+  if (matched_obj_id.empty()) {
+    if (opt_.semantic_verify_exact) {
     // Exact verification: load stored embeddings and compute exact cosine similarity.
     // This is more accurate than relying on approximate HNSW distances.
     rocksdb::ReadOptions ro_snap;
@@ -1787,6 +1833,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       }
     }
   }
+  }  // End of embedding-based matching fallback
 
   if (!dedup_hit_final) {
     EmitCounter(opt_, "prestige.semantic.miss_total", 1);
@@ -2020,6 +2067,78 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
   }
 
   return finish(rocksdb::Status::TimedOut("Put exceeded max_retries"));
+}
+
+std::string Store::RerankCandidates(std::string_view query_text,
+                                    const std::vector<internal::SearchResult>& candidates,
+                                    float* best_score_out) const {
+  // Load candidate texts from RocksDB
+  std::vector<std::string> candidate_texts;
+  std::vector<std::string> candidate_ids;
+  
+  rocksdb::ReadOptions ro;
+  for (const auto& candidate : candidates) {
+    std::string text;
+    rocksdb::Status s = db_->Get(ro, objects_cf_, 
+                                 rocksdb::Slice(candidate.object_id), 
+                                 &text);
+    if (s.ok()) {
+      candidate_texts.push_back(text);
+      candidate_ids.push_back(candidate.object_id);
+    }
+  }
+  
+  if (candidate_texts.empty()) {
+    return "";  // No valid candidates to rerank
+  }
+  
+  // Score candidates with reranker
+  std::vector<internal::ScoringResult> scores;
+  
+  if (opt_.semantic_reranker_batch_size > 1) {
+    // Process in batches for efficiency
+    for (size_t i = 0; i < candidate_texts.size(); i += opt_.semantic_reranker_batch_size) {
+      size_t batch_end = std::min(i + static_cast<size_t>(opt_.semantic_reranker_batch_size), 
+                                  candidate_texts.size());
+      std::vector<std::string_view> batch;
+      for (size_t j = i; j < batch_end; ++j) {
+        batch.push_back(candidate_texts[j]);
+      }
+      
+      auto batch_results = reranker_->ScoreBatch(query_text, batch);
+      scores.insert(scores.end(), batch_results.begin(), batch_results.end());
+    }
+  } else {
+    // Score one at a time
+    for (const auto& candidate_text : candidate_texts) {
+      scores.push_back(reranker_->Score(query_text, candidate_text));
+    }
+  }
+  
+  // Find best match above threshold
+  std::string best_match_id;
+  float best_score = -1.0f;
+  
+  for (size_t i = 0; i < scores.size(); ++i) {
+    if (scores[i].success && 
+        scores[i].score >= opt_.semantic_reranker_threshold && 
+        scores[i].score > best_score) {
+      best_score = scores[i].score;
+      best_match_id = candidate_ids[i];
+    }
+  }
+  
+  // Emit metrics
+  if (!best_match_id.empty()) {
+    EmitHistogram(opt_, "prestige.semantic.reranker_score", 
+                  static_cast<uint64_t>(best_score * 1000));  // Convert to millis for histogram
+  }
+  
+  if (best_score_out) {
+    *best_score_out = best_score;
+  }
+  
+  return best_match_id;
 }
 
 #endif  // PRESTIGE_ENABLE_SEMANTIC
