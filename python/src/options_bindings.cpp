@@ -52,6 +52,15 @@ void BindOptions(py::module_& m) {
              "Mean pooling over sequence (default)")
       .value("CLS", SemanticPooling::kCLS,
              "CLS token pooling (first token)");
+
+  // SemanticDevice enum
+  py::enum_<SemanticDevice>(m, "SemanticDevice", "Device for ONNX inference")
+      .value("CPU", SemanticDevice::kCPU,
+             "CPU inference")
+      .value("GPU", SemanticDevice::kGPU,
+             "GPU inference (CUDA)")
+      .value("AUTO", SemanticDevice::kAuto,
+             "Auto-detect: use GPU if available (default)");
 #endif
 
   // Options class
@@ -115,6 +124,8 @@ void BindOptions(py::module_& m) {
                      "Nearest neighbors to search (default: 50)")
       .def_readwrite("semantic_num_threads", &Options::semantic_num_threads,
                      "ONNX inference threads (0 = all cores, default: 0)")
+      .def_readwrite("semantic_device", &Options::semantic_device,
+                     "Device for ONNX inference (default: AUTO)")
       .def_readwrite("semantic_pooling", &Options::semantic_pooling,
                      "Pooling strategy (default: MEAN)")
       .def_readwrite("semantic_verify_exact", &Options::semantic_verify_exact,

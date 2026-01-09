@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include <prestige/embedder.hpp>  // For InferenceDevice enum
+
 namespace prestige::internal {
 
 /**
@@ -61,7 +63,7 @@ public:
 
 /**
  * BGE-reranker-v2-m3 implementation.
- * 
+ *
  * This is a cross-encoder model from BAAI that provides high-quality
  * text pair scoring for semantic similarity and relevance ranking.
  */
@@ -69,10 +71,12 @@ class BGERerankerV2 : public Reranker {
 public:
   /**
    * Create a BGE reranker.
-   * 
+   *
    * @param num_threads Number of threads for ONNX inference (0 = all cores)
+   * @param device Inference device: CPU, GPU, or Auto (default)
    */
-  explicit BGERerankerV2(int num_threads = 0);
+  explicit BGERerankerV2(int num_threads = 0,
+                         InferenceDevice device = InferenceDevice::kAuto);
   
   ~BGERerankerV2();
   
@@ -107,15 +111,17 @@ private:
 
 /**
  * Factory function to create appropriate reranker based on model type.
- * 
+ *
  * @param model_path Path to model file
  * @param num_threads Number of threads for inference
+ * @param device Inference device: CPU, GPU, or Auto (default)
  * @param error_out Error message output
  * @return Reranker instance or nullptr on failure
  */
 std::unique_ptr<Reranker> CreateReranker(
     const std::string& model_path,
-    int num_threads,
-    std::string* error_out);
+    int num_threads = 0,
+    InferenceDevice device = InferenceDevice::kAuto,
+    std::string* error_out = nullptr);
 
 }  // namespace prestige::internal

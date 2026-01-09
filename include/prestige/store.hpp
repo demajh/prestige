@@ -88,6 +88,13 @@ enum class SemanticPooling {
   kCLS        // Use [CLS] token output (better for some retrieval models)
 };
 
+/** Device for ONNX Runtime inference. */
+enum class SemanticDevice {
+  kCPU,       // CPU inference
+  kGPU,       // GPU inference (CUDA)
+  kAuto       // Auto-detect: use GPU if available, fall back to CPU (default)
+};
+
 /**
  * Options for the prestige unique value store.
  *
@@ -225,6 +232,9 @@ struct Options {
 
   // Number of threads for ONNX embedding inference (0 = use all available cores)
   int semantic_num_threads = 0;
+
+  // Device for ONNX inference (CPU, GPU, or Auto)
+  SemanticDevice semantic_device = SemanticDevice::kAuto;
 
   // Pooling strategy for transformer output
   SemanticPooling semantic_pooling = SemanticPooling::kMean;

@@ -91,6 +91,12 @@ def cli():
     help="Sample N pairs from dataset (default: use all)",
 )
 @click.option(
+    "--device",
+    type=click.Choice(["auto", "gpu", "cpu"], case_sensitive=False),
+    default="auto",
+    help="Inference device: auto, gpu, or cpu (default: auto)",
+)
+@click.option(
     "--enable-reranker",
     is_flag=True,
     help="Enable two-stage retrieval with reranker for higher accuracy",
@@ -123,6 +129,7 @@ def run(
     json_only: bool,
     pooling: str,
     sample: Optional[int],
+    device: str,
     enable_reranker: bool,
     reranker_model: str,
     reranker_threshold: float,
@@ -167,6 +174,7 @@ def run(
         click.echo(f"Thresholds: {', '.join(map(str, threshold_values))}")
         click.echo(f"Output: {output}")
         click.echo(f"Embedding Model: {model}")
+        click.echo(f"Device: {device.upper()}")
         if enable_reranker:
             click.echo(f"Reranker: {reranker_model}")
             click.echo(f"Reranker Threshold: {reranker_threshold}")
@@ -198,6 +206,7 @@ def run(
             verbose=not quiet,
             pooling=pooling,
             sample_size=sample,
+            device=device,
             enable_reranker=enable_reranker,
             reranker_model=reranker_model,
             reranker_threshold=reranker_threshold,
@@ -397,18 +406,29 @@ def list_datasets():
     "--reranker-threshold", type=float, default=0.8, help="Reranker threshold (default: 0.8)"
 )
 @click.option(
+    "--reranker-top-k", type=int, default=100, help="Candidates for reranking (default: 100)"
+)
+@click.option(
     "--cache-dir", type=click.Path(path_type=Path), default=None, help="Cache directory"
 )
 @click.option(
     "--sample", type=int, default=500, help="Number of pairs to sample (default: 500)"
+)
+@click.option(
+    "--device",
+    type=click.Choice(["auto", "gpu", "cpu"], case_sensitive=False),
+    default="auto",
+    help="Inference device: auto, gpu, or cpu (default: auto)",
 )
 def compare_reranker(
     dataset: str,
     threshold: float,
     model: str,
     reranker_threshold: float,
+    reranker_top_k: int,
     cache_dir: Optional[Path],
     sample: int,
+    device: str,
 ):
     """Compare embeddings-only vs. reranker performance.
     
@@ -434,8 +454,10 @@ def compare_reranker(
     click.echo(f"Dataset: {dataset}")
     click.echo(f"Sample size: {sample} pairs")
     click.echo(f"Embedding model: {model}")
+    click.echo(f"Device: {device.upper()}")
     click.echo(f"Semantic threshold: {threshold}")
     click.echo(f"Reranker threshold: {reranker_threshold}")
+    click.echo(f"Reranker top-k: {reranker_top_k}")
     click.echo("=" * 70)
     
     results = {}
@@ -449,6 +471,7 @@ def compare_reranker(
         embedding_model=model,
         sample_size=sample,
         verbose=False,
+        device=device,
         enable_reranker=False,
     )
     
@@ -460,14 +483,15 @@ def compare_reranker(
     click.echo("\n[2/2] Testing with reranker...")
     config_reranker = BenchmarkConfig(
         dataset_config=dataset_config,
-        thresholds=[threshold], 
+        thresholds=[threshold],
         cache_dir=cache_dir,
         embedding_model=model,
         sample_size=sample,
         verbose=False,
+        device=device,
         enable_reranker=True,
         reranker_threshold=reranker_threshold,
-        reranker_top_k=100,
+        reranker_top_k=reranker_top_k,
     )
     
     benchmark = SemanticDedupBenchmark(config_reranker)

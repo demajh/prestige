@@ -16,8 +16,9 @@ namespace prestige::internal {
 // Implementation class for BGERerankerV2
 class BGERerankerV2::Impl {
 public:
-  Impl(int num_threads)
+  Impl(int num_threads, InferenceDevice device)
       : num_threads_(num_threads),
+        device_(device),
         env_(ORT_LOGGING_LEVEL_WARNING, "prestige_reranker"),
         memory_info_(Ort::MemoryInfo::CreateCpu(
             OrtAllocatorType::OrtArenaAllocator,
@@ -63,6 +64,33 @@ public:
       session_options.SetIntraOpNumThreads(num_threads_);
       session_options.SetGraphOptimizationLevel(
           GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+
+      // Configure execution provider based on device setting
+      bool use_gpu = false;
+      if (device_ == InferenceDevice::kGPU) {
+        use_gpu = true;
+      } else if (device_ == InferenceDevice::kAuto) {
+        // Auto-detect: try GPU first
+        use_gpu = true;
+      }
+
+      if (use_gpu) {
+        try {
+          OrtCUDAProviderOptions cuda_options;
+          cuda_options.device_id = 0;
+          session_options.AppendExecutionProvider_CUDA(cuda_options);
+          using_gpu_ = true;
+        } catch (const Ort::Exception& e) {
+          // GPU not available
+          if (device_ == InferenceDevice::kGPU) {
+            // User explicitly requested GPU, fail
+            if (error_out) *error_out = std::string("CUDA not available: ") + e.what();
+            return false;
+          }
+          // Auto mode: fall back to CPU silently
+          using_gpu_ = false;
+        }
+      }
 
       session_ = std::make_unique<Ort::Session>(
           env_, model_path.c_str(), session_options);
@@ -216,8 +244,10 @@ private:
   }
 
   int num_threads_;
+  InferenceDevice device_;
+  bool using_gpu_ = false;
   std::unique_ptr<WordPieceTokenizer> tokenizer_;
-  
+
   Ort::Env env_;
   Ort::MemoryInfo memory_info_;
   std::unique_ptr<Ort::Session> session_;
@@ -229,8 +259,8 @@ private:
 };
 
 // BGERerankerV2 implementation
-BGERerankerV2::BGERerankerV2(int num_threads)
-    : impl_(std::make_unique<Impl>(num_threads)) {}
+BGERerankerV2::BGERerankerV2(int num_threads, InferenceDevice device)
+    : impl_(std::make_unique<Impl>(num_threads, device)) {}
 
 BGERerankerV2::~BGERerankerV2() = default;
 
@@ -255,15 +285,16 @@ std::vector<ScoringResult> BGERerankerV2::ScoreBatch(
 std::unique_ptr<Reranker> CreateReranker(
     const std::string& model_path,
     int num_threads,
+    InferenceDevice device,
     std::string* error_out) {
   // For now, only support BGE reranker
   // Could extend to support other models based on model_path detection
-  auto reranker = std::make_unique<BGERerankerV2>(num_threads);
-  
+  auto reranker = std::make_unique<BGERerankerV2>(num_threads, device);
+
   if (!reranker->Initialize(model_path, "", error_out)) {
     return nullptr;
   }
-  
+
   return reranker;
 }
 
@@ -274,7 +305,7 @@ std::unique_ptr<Reranker> CreateReranker(
 // Stub implementation when semantic features are disabled
 namespace prestige::internal {
 
-BGERerankerV2::BGERerankerV2(int) {}
+BGERerankerV2::BGERerankerV2(int, InferenceDevice) {}
 BGERerankerV2::~BGERerankerV2() = default;
 
 bool BGERerankerV2::Initialize(const std::string&, const std::string&, std::string* error_out) {
@@ -293,7 +324,7 @@ std::vector<ScoringResult> BGERerankerV2::ScoreBatch(
   return {};
 }
 
-std::unique_ptr<Reranker> CreateReranker(const std::string&, int, std::string* error_out) {
+std::unique_ptr<Reranker> CreateReranker(const std::string&, int, InferenceDevice, std::string* error_out) {
   if (error_out) {
     *error_out = "Reranker requires PRESTIGE_ENABLE_SEMANTIC=ON";
   }

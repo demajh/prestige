@@ -33,7 +33,8 @@ class BenchmarkConfig:
     verbose: bool = True
     pooling: str = "mean"  # "mean" or "cls"
     sample_size: Optional[int] = None  # Number of pairs to sample (None = use all)
-    
+    device: str = "auto"  # "auto", "gpu", or "cpu"
+
     # Reranker settings
     enable_reranker: bool = False
     reranker_model: str = "bge-reranker-base"
@@ -131,6 +132,15 @@ class SemanticDedupBenchmark:
                 options.semantic_pooling = prestige.SemanticPooling.CLS
             else:
                 options.semantic_pooling = prestige.SemanticPooling.MEAN
+
+            # Set device (CPU, GPU, or Auto)
+            device_str = self.config.device.lower()
+            if device_str == "gpu":
+                options.semantic_device = prestige.SemanticDevice.GPU
+            elif device_str == "cpu":
+                options.semantic_device = prestige.SemanticDevice.CPU
+            else:
+                options.semantic_device = prestige.SemanticDevice.AUTO
 
             # Configure reranker if enabled
             if self.config.enable_reranker:

@@ -1,6 +1,5 @@
 #include <prestige/store.hpp>
 
-#include <rocksdb/advanced_cache.h>
 #include <rocksdb/cache.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/statistics.h>
@@ -245,6 +244,20 @@ rocksdb::Status Store::Open(const std::string& db_path,
     store->embeddings_cf_ = store->handles_[7];
     store->vector_pending_cf_ = store->handles_[8];
 
+    // Convert device option (used for both embedder and reranker)
+    internal::InferenceDevice device_type = internal::InferenceDevice::kAuto;
+    switch (opt.semantic_device) {
+      case SemanticDevice::kCPU:
+        device_type = internal::InferenceDevice::kCPU;
+        break;
+      case SemanticDevice::kGPU:
+        device_type = internal::InferenceDevice::kGPU;
+        break;
+      case SemanticDevice::kAuto:
+        device_type = internal::InferenceDevice::kAuto;
+        break;
+    }
+
     // Create or use provided embedder
     if (opt.custom_embedder) {
       // Use the custom embedder (takes ownership)
@@ -275,6 +288,7 @@ rocksdb::Status Store::Open(const std::string& db_path,
           embedder_type,
           opt.semantic_num_threads,
           pooling_type,
+          device_type,
           &embedder_error);
 
       if (!store->embedder_) {
@@ -316,8 +330,9 @@ rocksdb::Status Store::Open(const std::string& db_path,
         store->reranker_ = internal::CreateReranker(
             opt.semantic_reranker_model_path,
             opt.semantic_reranker_num_threads,
+            device_type,
             &reranker_error);
-        
+
         if (!store->reranker_ && !opt.semantic_reranker_fallback) {
           store->Close();
           return rocksdb::Status::InvalidArgument(

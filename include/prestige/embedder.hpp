@@ -27,6 +27,13 @@ enum class EmbedderPooling {
   kCLS        // Use [CLS] token output (index 0)
 };
 
+// Device for inference
+enum class InferenceDevice {
+  kCPU,       // CPU inference (default)
+  kGPU,       // GPU inference via CUDA
+  kAuto       // Auto-detect: use GPU if available, fall back to CPU
+};
+
 // ONNX-based text embedder
 class Embedder {
  public:
@@ -36,12 +43,14 @@ class Embedder {
   // Vocabulary file (vocab.txt) is auto-detected in the same directory as the model.
   // num_threads: 0 = use all available cores, >0 = use specified number of threads
   // pooling: mean or CLS pooling for sequence output
+  // device: CPU, GPU, or Auto (use GPU if available)
   // Returns nullptr on failure, sets error_out if provided
   static std::unique_ptr<Embedder> Create(
       const std::string& model_path,
       EmbedderModelType type,
       int num_threads = 0,
       EmbedderPooling pooling = EmbedderPooling::kMean,
+      InferenceDevice device = InferenceDevice::kAuto,
       std::string* error_out = nullptr);
 
   // Compute embedding for text input

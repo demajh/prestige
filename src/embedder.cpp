@@ -16,11 +16,12 @@ namespace prestige::internal {
 class OnnxEmbedder : public Embedder {
  public:
   OnnxEmbedder(EmbedderModelType type, size_t dimension, int num_threads,
-               EmbedderPooling pooling)
+               EmbedderPooling pooling, InferenceDevice device)
       : model_type_(type),
         dimension_(dimension),
         num_threads_(num_threads),
         pooling_(pooling),
+        device_(device),
         env_(ORT_LOGGING_LEVEL_WARNING, "prestige_embedder"),
         memory_info_(Ort::MemoryInfo::CreateCpu(
             OrtAllocatorType::OrtArenaAllocator,
@@ -44,6 +45,33 @@ class OnnxEmbedder : public Embedder {
       session_options.SetIntraOpNumThreads(num_threads_);
       session_options.SetGraphOptimizationLevel(
           GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+
+      // Configure execution provider based on device setting
+      bool use_gpu = false;
+      if (device_ == InferenceDevice::kGPU) {
+        use_gpu = true;
+      } else if (device_ == InferenceDevice::kAuto) {
+        // Auto-detect: try GPU first
+        use_gpu = true;
+      }
+
+      if (use_gpu) {
+        try {
+          OrtCUDAProviderOptions cuda_options;
+          cuda_options.device_id = 0;
+          session_options.AppendExecutionProvider_CUDA(cuda_options);
+          using_gpu_ = true;
+        } catch (const Ort::Exception& e) {
+          // GPU not available
+          if (device_ == InferenceDevice::kGPU) {
+            // User explicitly requested GPU, fail
+            if (error_out) *error_out = std::string("CUDA not available: ") + e.what();
+            return false;
+          }
+          // Auto mode: fall back to CPU silently
+          using_gpu_ = false;
+        }
+      }
 
       session_ = std::make_unique<Ort::Session>(
           env_, model_path.c_str(), session_options);
@@ -226,6 +254,8 @@ class OnnxEmbedder : public Embedder {
   size_t dimension_;
   int num_threads_;
   EmbedderPooling pooling_;
+  InferenceDevice device_;
+  bool using_gpu_ = false;
 
   std::unique_ptr<WordPieceTokenizer> tokenizer_;
 
@@ -271,6 +301,7 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
                                            EmbedderModelType type,
                                            int num_threads,
                                            EmbedderPooling pooling,
+                                           InferenceDevice device,
                                            std::string* error_out) {
   // Auto-detect vocab path
   std::string vocab_path = FindVocabPath(model_path);
@@ -294,7 +325,7 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
       break;
   }
 
-  auto embedder = std::make_unique<OnnxEmbedder>(type, dimension, num_threads, pooling);
+  auto embedder = std::make_unique<OnnxEmbedder>(type, dimension, num_threads, pooling, device);
   if (!embedder->Initialize(model_path, vocab_path, error_out)) {
     return nullptr;
   }
@@ -312,6 +343,7 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& /*model_path*/,
                                            EmbedderModelType /*type*/,
                                            int /*num_threads*/,
                                            EmbedderPooling /*pooling*/,
+                                           InferenceDevice /*device*/,
                                            std::string* error_out) {
   if (error_out) {
     *error_out =
