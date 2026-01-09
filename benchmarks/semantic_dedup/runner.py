@@ -43,6 +43,12 @@ class BenchmarkConfig:
     reranker_batch_size: int = 8
     reranker_fallback: bool = True
 
+    # Reciprocal Nearest Neighbor (RNN) + Margin Gating settings
+    enable_rnn: bool = False
+    rnn_k: int = 0  # 0 = use semantic_search_k
+    enable_margin: bool = False
+    margin_threshold: float = 0.05
+
 
 class SemanticDedupBenchmark:
     """Benchmark harness for semantic deduplication evaluation."""
@@ -160,6 +166,15 @@ class SemanticDedupBenchmark:
                 options.semantic_reranker_batch_size = self.config.reranker_batch_size
                 options.semantic_reranker_fallback = self.config.reranker_fallback
 
+            # Configure RNN + margin gating if enabled
+            if self.config.enable_rnn:
+                options.semantic_rnn_enabled = True
+                options.semantic_rnn_k = self.config.rnn_k
+
+            if self.config.enable_margin:
+                options.semantic_margin_enabled = True
+                options.semantic_margin_threshold = self.config.margin_threshold
+
             store = prestige.Store.open(str(store_path), options)
 
             # Initialize metrics
@@ -245,8 +260,15 @@ class SemanticDedupBenchmark:
             # Print summary
             if self.config.verbose:
                 metrics = BenchmarkMetrics.from_confusion_matrix(confusion_matrix)
-                reranker_status = " (with reranker)" if self.config.enable_reranker else ""
-                print(f"\nResults for threshold {threshold}{reranker_status}:")
+                status_parts = []
+                if self.config.enable_reranker:
+                    status_parts.append("reranker")
+                if self.config.enable_rnn:
+                    status_parts.append(f"RNN-k{self.config.rnn_k or 'auto'}")
+                if self.config.enable_margin:
+                    status_parts.append(f"margin={self.config.margin_threshold}")
+                status_str = f" ({', '.join(status_parts)})" if status_parts else ""
+                print(f"\nResults for threshold {threshold}{status_str}:")
                 print(f"  Precision: {metrics.precision:.4f}")
                 print(f"  Recall:    {metrics.recall:.4f}")
                 print(f"  F1 Score:  {metrics.f1_score:.4f}")

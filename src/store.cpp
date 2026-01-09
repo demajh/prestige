@@ -1819,6 +1819,16 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
     // Exact verification: load stored embeddings and compute exact cosine similarity.
     // This is more accurate than relying on approximate HNSW distances.
     rocksdb::ReadOptions ro_snap;
+    size_t dim = embedding.size();
+
+    // Collect all candidates with their exact cosine similarities
+    struct CandidateScore {
+      std::string object_id;
+      float cos_sim;
+      std::vector<float> stored_embedding;  // Cached for RNN check
+    };
+    std::vector<CandidateScore> scored_candidates;
+    scored_candidates.reserve(candidates.size());
 
     for (const auto& candidate : candidates) {
       // Load stored embedding for this candidate
@@ -1831,7 +1841,6 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       }
 
       // Parse stored embedding
-      size_t dim = embedding.size();
       if (stored_embedding_bytes.size() != dim * sizeof(float)) {
         continue;  // Dimension mismatch, skip
       }
@@ -1844,11 +1853,119 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       }
 
       if (cos_sim >= opt_.semantic_threshold) {
-        // Found a semantic match with exact verification
-        matched_obj_id = candidate.object_id;
+        CandidateScore cs;
+        cs.object_id = candidate.object_id;
+        cs.cos_sim = cos_sim;
+        // Cache embedding for RNN and margin gating checks
+        if (opt_.semantic_rnn_enabled || opt_.semantic_margin_enabled) {
+          cs.stored_embedding.assign(stored, stored + dim);
+        }
+        scored_candidates.push_back(std::move(cs));
+      }
+    }
+
+    // Sort by cosine similarity descending (best match first)
+    std::sort(scored_candidates.begin(), scored_candidates.end(),
+              [](const CandidateScore& a, const CandidateScore& b) {
+                return a.cos_sim > b.cos_sim;
+              });
+
+    // Apply RNN + margin gating checks to find valid match
+    bool need_b_search = opt_.semantic_rnn_enabled || opt_.semantic_margin_enabled;
+    int rnn_k = opt_.semantic_rnn_k > 0 ? opt_.semantic_rnn_k : opt_.semantic_search_k;
+
+    for (size_t i = 0; i < scored_candidates.size(); ++i) {
+      const auto& best = scored_candidates[i];
+      bool accept = true;
+
+      // Margin gating from A's perspective: cos(A,B) - cos(A,2nd_best) >= margin
+      if (opt_.semantic_margin_enabled) {
+        float second_best_sim = (i + 1 < scored_candidates.size())
+                                 ? scored_candidates[i + 1].cos_sim
+                                 : 0.0f;
+        float margin_a = best.cos_sim - second_best_sim;
+
+        if (margin_a < opt_.semantic_margin_threshold) {
+          EmitCounter(opt_, "prestige.semantic.margin_reject_a", 1);
+          accept = false;
+        }
+      }
+
+      // Search from B's embedding (shared for RNN and margin checks)
+      std::vector<internal::SearchResult> b_neighbors;
+      if (need_b_search && accept) {
+        // Request enough neighbors for both RNN (k) and margin (need 2nd best)
+        int search_k = rnn_k + 1;  // +1 to skip self and still have k neighbors
+        b_neighbors = vector_index_->Search(best.stored_embedding, search_k);
+      }
+
+      // Margin gating from B's perspective: cos(B,A) - cos(B,2nd_best) >= margin
+      if (opt_.semantic_margin_enabled && accept && !b_neighbors.empty()) {
+        // Find B's second-best neighbor (first non-self neighbor after position 0)
+        float b_second_best = 0.0f;
+        int valid_neighbor_count = 0;
+        for (const auto& neighbor : b_neighbors) {
+          if (neighbor.object_id == best.object_id) continue;  // Skip self
+          valid_neighbor_count++;
+          if (valid_neighbor_count == 2) {
+            // This is the second-best neighbor
+            // Convert L2 squared to cosine: cos = 1 - d²/2
+            b_second_best = 1.0f - neighbor.distance / 2.0f;
+            break;
+          }
+        }
+
+        float margin_b = best.cos_sim - b_second_best;
+        if (margin_b < opt_.semantic_margin_threshold) {
+          EmitCounter(opt_, "prestige.semantic.margin_reject_b", 1);
+          accept = false;
+        }
+      }
+
+      // Reciprocal kNN check: verify A is in B's top-k neighbors
+      if (opt_.semantic_rnn_enabled && accept && !b_neighbors.empty()) {
+        // A is in B's top-k if cos(A,B) >= cos(B, B_kth)
+        // Find B's k-th valid neighbor (excluding self)
+        float kth_neighbor_cos = 0.0f;
+        int valid_count = 0;
+        for (const auto& neighbor : b_neighbors) {
+          if (neighbor.object_id == best.object_id) continue;  // Skip self
+          valid_count++;
+          if (valid_count == rnn_k) {
+            // This is the k-th neighbor
+            kth_neighbor_cos = 1.0f - neighbor.distance / 2.0f;
+            break;
+          }
+        }
+
+        // If fewer than k neighbors, use the last one's similarity
+        if (valid_count > 0 && valid_count < rnn_k) {
+          for (const auto& neighbor : b_neighbors) {
+            if (neighbor.object_id != best.object_id) {
+              kth_neighbor_cos = 1.0f - neighbor.distance / 2.0f;
+            }
+          }
+        }
+
+        // A would be in B's top-k if A's similarity is better than B's k-th neighbor
+        if (best.cos_sim < kth_neighbor_cos) {
+          EmitCounter(opt_, "prestige.semantic.rnn_reject", 1);
+          accept = false;
+        }
+      }
+
+      if (accept) {
+        matched_obj_id = best.object_id;
+        best_score = best.cos_sim;
         dedup_hit_final = true;
         EmitCounter(opt_, "prestige.semantic.hit_total", 1);
         EmitCounter(opt_, "prestige.semantic.exact_verified", 1);
+        if (opt_.semantic_rnn_enabled) {
+          EmitCounter(opt_, "prestige.semantic.rnn_accepted", 1);
+        }
+        if (opt_.semantic_margin_enabled) {
+          EmitCounter(opt_, "prestige.semantic.margin_accepted", 1);
+        }
         break;
       }
     }
@@ -1856,6 +1973,7 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
     // Approximate verification: use HNSW L2 distance (L2 squared for hnswlib)
     // L2² for normalized vectors: d² = 2 * (1 - cos_sim)
     // We want cos_sim >= threshold, which means d² <= 2 * (1 - threshold)
+    // Note: RNN and margin gating require exact verification mode
     float max_l2_sq = 2.0f * (1.0f - opt_.semantic_threshold);
 
     for (const auto& candidate : candidates) {

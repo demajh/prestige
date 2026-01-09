@@ -118,6 +118,28 @@ def cli():
     default=100,
     help="Number of candidates for reranking (default: 100)",
 )
+@click.option(
+    "--enable-rnn",
+    is_flag=True,
+    help="Enable reciprocal kNN check for false positive reduction",
+)
+@click.option(
+    "--rnn-k",
+    type=int,
+    default=0,
+    help="Number of neighbors for reciprocal check (0 = use search_k)",
+)
+@click.option(
+    "--enable-margin",
+    is_flag=True,
+    help="Enable margin gating for false positive reduction",
+)
+@click.option(
+    "--margin-threshold",
+    type=float,
+    default=0.05,
+    help="Margin threshold: cos(A,B) - cos(A,2nd) >= margin (default: 0.05)",
+)
 def run(
     datasets: str,
     thresholds: str,
@@ -134,6 +156,10 @@ def run(
     reranker_model: str,
     reranker_threshold: float,
     reranker_top_k: int,
+    enable_rnn: bool,
+    rnn_k: int,
+    enable_margin: bool,
+    margin_threshold: float,
 ):
     """Run semantic deduplication benchmarks.
 
@@ -179,6 +205,10 @@ def run(
             click.echo(f"Reranker: {reranker_model}")
             click.echo(f"Reranker Threshold: {reranker_threshold}")
             click.echo(f"Reranker Top-K: {reranker_top_k}")
+        if enable_rnn:
+            click.echo(f"RNN k: {rnn_k if rnn_k > 0 else 'auto'}")
+        if enable_margin:
+            click.echo(f"Margin Threshold: {margin_threshold}")
         click.echo("=" * 60)
 
     # Run benchmarks for each dataset
@@ -211,6 +241,10 @@ def run(
             reranker_model=reranker_model,
             reranker_threshold=reranker_threshold,
             reranker_top_k=reranker_top_k,
+            enable_rnn=enable_rnn,
+            rnn_k=rnn_k,
+            enable_margin=enable_margin,
+            margin_threshold=margin_threshold,
         )
 
         # Run benchmark

@@ -190,6 +190,20 @@ void BindOptions(py::module_& m) {
       .def_readwrite("semantic_reranker_fallback",
                      &Options::semantic_reranker_fallback,
                      "Fall back to embeddings if reranker fails (default: true)")
+
+      // Reciprocal Nearest Neighbor (RNN) + Margin Gating
+      .def_readwrite("semantic_rnn_enabled",
+                     &Options::semantic_rnn_enabled,
+                     "Enable reciprocal kNN check for FP reduction (default: false)")
+      .def_readwrite("semantic_rnn_k",
+                     &Options::semantic_rnn_k,
+                     "Number of neighbors for reciprocal check (0=use search_k)")
+      .def_readwrite("semantic_margin_enabled",
+                     &Options::semantic_margin_enabled,
+                     "Enable margin gating for FP reduction (default: false)")
+      .def_readwrite("semantic_margin_threshold",
+                     &Options::semantic_margin_threshold,
+                     "Margin threshold: cos(A,B) - cos(A,2nd) >= margin (default: 0.05)")
 #endif
 
       // Repr
