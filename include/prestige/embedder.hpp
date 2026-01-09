@@ -16,9 +16,12 @@ struct EmbeddingResult {
 
 // Supported model types
 enum class EmbedderModelType {
-  kMiniLM,    // all-MiniLM-L6-v2 (384 dimensions)
-  kBGESmall,  // BGE-small-en-v1.5 (384 dimensions)
-  kBGELarge   // BGE-large-en-v1.5 (1024 dimensions)
+  kMiniLM,      // all-MiniLM-L6-v2 (384 dimensions)
+  kBGESmall,    // BGE-small-en-v1.5 (384 dimensions)
+  kBGELarge,    // BGE-large-en-v1.5 (1024 dimensions)
+  kE5Large,     // intfloat/e5-large-v2 (1024 dimensions)
+  kBGEM3,       // BAAI/bge-m3 (1024 dimensions)
+  kNomicEmbed   // nomic-ai/nomic-embed-text-v1.5 (768 dimensions)
 };
 
 // Pooling strategy for transformer output

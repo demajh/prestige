@@ -37,7 +37,13 @@ void BindOptions(py::module_& m) {
       .value("BGE_SMALL", SemanticModel::kBGESmall,
              "BGE-small-en-v1.5 (384 dimensions)")
       .value("BGE_LARGE", SemanticModel::kBGELarge,
-             "BGE-large-en-v1.5 (1024 dimensions)");
+             "BGE-large-en-v1.5 (1024 dimensions)")
+      .value("E5_LARGE", SemanticModel::kE5Large,
+             "intfloat/e5-large-v2 (1024 dimensions)")
+      .value("BGE_M3", SemanticModel::kBGEM3,
+             "BAAI/bge-m3 (1024 dimensions)")
+      .value("NOMIC_EMBED", SemanticModel::kNomicEmbed,
+             "nomic-ai/nomic-embed-text-v1.5 (768 dimensions)");
 
   // SemanticIndexType enum
   py::enum_<SemanticIndexType>(m, "SemanticIndexType", "Vector index backend")

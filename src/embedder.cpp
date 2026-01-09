@@ -113,16 +113,38 @@ class OnnxEmbedder : public Embedder {
     EmbeddingResult result;
 
     try {
-      // For BGE models, prepend instruction prefix for better accuracy
-      // See: https://huggingface.co/BAAI/bge-small-en-v1.5
+      // For instruction-tuned models, prepend appropriate prefix for better accuracy
+      // Each model family has its own recommended prefix
       std::string prefixed_text;
       std::string_view text_to_embed = text;
-      if (model_type_ == EmbedderModelType::kBGESmall ||
-          model_type_ == EmbedderModelType::kBGELarge) {
-        static constexpr std::string_view kBGEPrefix =
-            "Represent this sentence for searching relevant passages: ";
-        prefixed_text.reserve(kBGEPrefix.size() + text.size());
-        prefixed_text.append(kBGEPrefix);
+
+      std::string_view prefix;
+      switch (model_type_) {
+        case EmbedderModelType::kBGESmall:
+        case EmbedderModelType::kBGELarge:
+        case EmbedderModelType::kBGEM3:
+          // BGE models: https://huggingface.co/BAAI/bge-small-en-v1.5
+          prefix = "Represent this sentence for searching relevant passages: ";
+          break;
+        case EmbedderModelType::kE5Large:
+          // E5 models: https://huggingface.co/intfloat/e5-large-v2
+          // Use "passage: " for document-to-document similarity
+          prefix = "passage: ";
+          break;
+        case EmbedderModelType::kNomicEmbed:
+          // Nomic models: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+          prefix = "search_document: ";
+          break;
+        case EmbedderModelType::kMiniLM:
+        default:
+          // MiniLM has no instruction prefix
+          prefix = "";
+          break;
+      }
+
+      if (!prefix.empty()) {
+        prefixed_text.reserve(prefix.size() + text.size());
+        prefixed_text.append(prefix);
         prefixed_text.append(text);
         text_to_embed = prefixed_text;
       }
@@ -321,7 +343,12 @@ std::unique_ptr<Embedder> Embedder::Create(const std::string& model_path,
       dimension = 384;
       break;
     case EmbedderModelType::kBGELarge:
+    case EmbedderModelType::kE5Large:
+    case EmbedderModelType::kBGEM3:
       dimension = 1024;
+      break;
+    case EmbedderModelType::kNomicEmbed:
+      dimension = 768;
       break;
   }
 

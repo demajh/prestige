@@ -71,9 +71,12 @@ enum class DedupMode {
 
 /** Supported embedding models for semantic dedup. */
 enum class SemanticModel {
-  kMiniLM,    // all-MiniLM-L6-v2 (384 dimensions)
-  kBGESmall,  // BGE-small-en-v1.5 (384 dimensions)
-  kBGELarge   // BGE-large-en-v1.5 (1024 dimensions)
+  kMiniLM,      // all-MiniLM-L6-v2 (384 dimensions)
+  kBGESmall,    // BGE-small-en-v1.5 (384 dimensions)
+  kBGELarge,    // BGE-large-en-v1.5 (1024 dimensions)
+  kE5Large,     // intfloat/e5-large-v2 (1024 dimensions)
+  kBGEM3,       // BAAI/bge-m3 (1024 dimensions)
+  kNomicEmbed   // nomic-ai/nomic-embed-text-v1.5 (768 dimensions)
 };
 
 /** Vector index backend for semantic similarity search. */
@@ -302,6 +305,31 @@ struct Options {
   // If provided, semantic_reranker_model_path is ignored
   // The Store takes ownership of this pointer
   internal::Reranker* custom_reranker = nullptr;
+
+  // ---------------------------------------------------------------------------
+  // Reciprocal Nearest Neighbor (RNN) + Margin Gating settings
+  // These are fast false-positive reduction techniques that don't need a reranker.
+  // ---------------------------------------------------------------------------
+
+  // Enable reciprocal nearest neighbor check.
+  // Accept A~B only if B is in A's top-k neighbors AND A is in B's top-k neighbors.
+  // This prevents "hub" documents that match many things generically.
+  bool semantic_rnn_enabled = false;
+
+  // Number of neighbors to consider for reciprocal check.
+  // Higher values are more permissive (fewer FP reductions), lower values stricter.
+  // Typically 5-20. Uses semantic_search_k if not set (0).
+  int semantic_rnn_k = 0;
+
+  // Enable margin gating for additional FP reduction.
+  // Requires: cos(A,B) - cos(A,2nd_best) >= margin AND cos(B,A) - cos(B,2nd_best) >= margin
+  // This ensures matches are significantly better than alternatives.
+  bool semantic_margin_enabled = false;
+
+  // Margin threshold for margin gating [0.0, 1.0].
+  // Higher values = stricter (more FP reduction, potentially lower recall).
+  // Typical values: 0.02-0.10
+  float semantic_margin_threshold = 0.05f;
 };
 
 /**

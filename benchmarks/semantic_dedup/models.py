@@ -18,6 +18,7 @@ MODEL_REGISTRY = {
         "vocab_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/vocab.txt",
         "model_size_mb": 133,
         "description": "BGE-small English v1.5 (384 dims)",
+        "dimensions": 384,
     },
     "bge-large": {
         "model_file": "model.onnx",
@@ -27,6 +28,37 @@ MODEL_REGISTRY = {
         "vocab_url": "https://huggingface.co/BAAI/bge-large-en-v1.5/resolve/main/vocab.txt",
         "model_size_mb": 1340,
         "description": "BGE-large English v1.5 (1024 dims)",
+        "dimensions": 1024,
+    },
+    "bge-m3": {
+        "model_file": "model.onnx",
+        "vocab_file": "vocab.txt",
+        "hf_repo": "BAAI/bge-m3",
+        "model_url": "https://huggingface.co/BAAI/bge-m3/resolve/main/onnx/model.onnx",
+        "vocab_url": "https://huggingface.co/BAAI/bge-m3/resolve/main/vocab.txt",
+        "model_size_mb": 2270,
+        "description": "BGE-M3 multi-lingual (1024 dims)",
+        "dimensions": 1024,
+    },
+    "e5-large": {
+        "model_file": "model.onnx",
+        "vocab_file": "vocab.txt",
+        "hf_repo": "intfloat/e5-large-v2",
+        "model_url": "https://huggingface.co/intfloat/e5-large-v2/resolve/main/onnx/model.onnx",
+        "vocab_url": "https://huggingface.co/intfloat/e5-large-v2/resolve/main/vocab.txt",
+        "model_size_mb": 1340,
+        "description": "E5-large-v2 (1024 dims)",
+        "dimensions": 1024,
+    },
+    "nomic-embed": {
+        "model_file": "model.onnx",
+        "vocab_file": "vocab.txt",
+        "hf_repo": "nomic-ai/nomic-embed-text-v1.5",
+        "model_url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model.onnx",
+        "vocab_url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/vocab.txt",
+        "model_size_mb": 548,
+        "description": "Nomic-embed-text v1.5 (768 dims)",
+        "dimensions": 768,
     },
     "minilm": {
         "model_file": "model.onnx",
@@ -36,15 +68,17 @@ MODEL_REGISTRY = {
         "vocab_url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt",
         "model_size_mb": 90,
         "description": "MiniLM-L6-v2 (384 dims)",
+        "dimensions": 384,
     },
     "bge-reranker-base": {
         "model_file": "model.onnx",
-        "vocab_file": "vocab.txt", 
+        "vocab_file": "vocab.txt",
         "hf_repo": "BAAI/bge-reranker-base",
         "model_url": "https://huggingface.co/BAAI/bge-reranker-base/resolve/main/onnx/model.onnx",
         "vocab_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/vocab.txt",  # Use compatible vocab
         "model_size_mb": 279,
         "description": "BGE-reranker-base cross-encoder",
+        "dimensions": 0,  # Cross-encoder, no embedding output
     },
 }
 

@@ -120,11 +120,20 @@ class SemanticDedupBenchmark:
 
             # Set model type based on model name
             model_name = self.config.embedding_model.lower()
-            if "bge-large" in model_name:
+            if "e5-large" in model_name or "e5large" in model_name:
+                options.semantic_model_type = prestige.SemanticModel.E5_LARGE
+            elif "bge-m3" in model_name or "bgem3" in model_name:
+                options.semantic_model_type = prestige.SemanticModel.BGE_M3
+            elif "nomic" in model_name:
+                options.semantic_model_type = prestige.SemanticModel.NOMIC_EMBED
+            elif "bge-large" in model_name:
                 options.semantic_model_type = prestige.SemanticModel.BGE_LARGE
             elif "bge" in model_name:
                 options.semantic_model_type = prestige.SemanticModel.BGE_SMALL
+            elif "minilm" in model_name:
+                options.semantic_model_type = prestige.SemanticModel.MINILM
             else:
+                # Default to MiniLM
                 options.semantic_model_type = prestige.SemanticModel.MINILM
 
             # Set pooling strategy

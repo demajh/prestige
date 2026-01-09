@@ -6,6 +6,15 @@
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/transaction.h>
 
+// RocksDB 7.x moved Cache methods to advanced_cache.h
+// Check if it exists (RocksDB 7+) or use version detection
+#if __has_include(<rocksdb/advanced_cache.h>)
+#include <rocksdb/advanced_cache.h>
+#define PRESTIGE_HAS_CACHE_METRICS 1
+#else
+#define PRESTIGE_HAS_CACHE_METRICS 0
+#endif
+
 #include <cstring>
 #include <random>
 #include <thread>
@@ -275,6 +284,15 @@ rocksdb::Status Store::Open(const std::string& db_path,
           break;
         case SemanticModel::kBGELarge:
           embedder_type = internal::EmbedderModelType::kBGELarge;
+          break;
+        case SemanticModel::kE5Large:
+          embedder_type = internal::EmbedderModelType::kE5Large;
+          break;
+        case SemanticModel::kBGEM3:
+          embedder_type = internal::EmbedderModelType::kBGEM3;
+          break;
+        case SemanticModel::kNomicEmbed:
+          embedder_type = internal::EmbedderModelType::kNomicEmbed;
           break;
       }
       // Convert pooling option
@@ -656,7 +674,8 @@ rocksdb::Status Store::GetObjectId(std::string_view user_key, std::string* objec
 void Store::EmitCacheMetrics() {
   if (!opt_.metrics) return;
 
-  // Cache fill rate and usage
+#if PRESTIGE_HAS_CACHE_METRICS
+  // Cache fill rate and usage (requires RocksDB 7+ advanced_cache.h)
   if (block_cache_) {
     size_t usage = block_cache_->GetUsage();
     size_t capacity = block_cache_->GetCapacity();
@@ -666,6 +685,7 @@ void Store::EmitCacheMetrics() {
     EmitGauge(opt_, "prestige.cache.usage_bytes", static_cast<double>(usage));
     EmitGauge(opt_, "prestige.cache.capacity_bytes", static_cast<double>(capacity));
   }
+#endif
 
   // Block cache hit/miss from RocksDB statistics
   if (statistics_) {
