@@ -280,6 +280,94 @@ class TestReportGeneration(unittest.TestCase):
         self.assertIn("test", html_content.lower())
 
 
+class TestBenchmarkConfig(unittest.TestCase):
+    """Test benchmark configuration options including judge LLM."""
+
+    def test_default_config(self):
+        """Test default configuration values."""
+        from .runner import BenchmarkConfig
+        from .dataset_loader import get_dataset_config
+
+        dataset_config = get_dataset_config("mrpc")
+        config = BenchmarkConfig(
+            dataset_config=dataset_config,
+            thresholds=[0.9],
+            cache_dir=Path(tempfile.gettempdir()),
+        )
+
+        # Default values
+        self.assertFalse(config.enable_judge)
+        self.assertEqual(config.judge_model, "prometheus-7b-v2.0")
+        self.assertEqual(config.judge_threshold, 0.75)
+        self.assertEqual(config.judge_context_size, 4096)
+        self.assertEqual(config.judge_gpu_layers, 0)
+
+    def test_judge_config_values(self):
+        """Test setting judge configuration values."""
+        from .runner import BenchmarkConfig
+        from .dataset_loader import get_dataset_config
+
+        dataset_config = get_dataset_config("mrpc")
+        config = BenchmarkConfig(
+            dataset_config=dataset_config,
+            thresholds=[0.9],
+            cache_dir=Path(tempfile.gettempdir()),
+            enable_judge=True,
+            judge_model="custom-judge-model",
+            judge_threshold=0.80,
+            judge_context_size=8192,
+            judge_gpu_layers=-1,
+        )
+
+        self.assertTrue(config.enable_judge)
+        self.assertEqual(config.judge_model, "custom-judge-model")
+        self.assertEqual(config.judge_threshold, 0.80)
+        self.assertEqual(config.judge_context_size, 8192)
+        self.assertEqual(config.judge_gpu_layers, -1)
+
+    def test_rnn_and_margin_config(self):
+        """Test RNN and margin gating configuration."""
+        from .runner import BenchmarkConfig
+        from .dataset_loader import get_dataset_config
+
+        dataset_config = get_dataset_config("mrpc")
+        config = BenchmarkConfig(
+            dataset_config=dataset_config,
+            thresholds=[0.9],
+            cache_dir=Path(tempfile.gettempdir()),
+            enable_rnn=True,
+            rnn_k=10,
+            enable_margin=True,
+            margin_threshold=0.10,
+        )
+
+        self.assertTrue(config.enable_rnn)
+        self.assertEqual(config.rnn_k, 10)
+        self.assertTrue(config.enable_margin)
+        self.assertEqual(config.margin_threshold, 0.10)
+
+    def test_reranker_config(self):
+        """Test reranker configuration."""
+        from .runner import BenchmarkConfig
+        from .dataset_loader import get_dataset_config
+
+        dataset_config = get_dataset_config("mrpc")
+        config = BenchmarkConfig(
+            dataset_config=dataset_config,
+            thresholds=[0.9],
+            cache_dir=Path(tempfile.gettempdir()),
+            enable_reranker=True,
+            reranker_model="bge-reranker-base",
+            reranker_threshold=0.75,
+            reranker_top_k=50,
+        )
+
+        self.assertTrue(config.enable_reranker)
+        self.assertEqual(config.reranker_model, "bge-reranker-base")
+        self.assertEqual(config.reranker_threshold, 0.75)
+        self.assertEqual(config.reranker_top_k, 50)
+
+
 class TestBaselineComparison(unittest.TestCase):
     """Test baseline comparison."""
 

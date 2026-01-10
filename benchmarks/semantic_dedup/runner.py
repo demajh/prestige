@@ -49,6 +49,13 @@ class BenchmarkConfig:
     enable_margin: bool = False
     margin_threshold: float = 0.05
 
+    # Judge LLM settings (Prometheus 2 for gray zone evaluation)
+    enable_judge: bool = False
+    judge_model: str = "prometheus-7b-v2.0"
+    judge_threshold: float = 0.75  # Min similarity to trigger judge
+    judge_context_size: int = 4096
+    judge_gpu_layers: int = 0  # 0 = CPU only, -1 = all layers to GPU
+
 
 class SemanticDedupBenchmark:
     """Benchmark harness for semantic deduplication evaluation."""
@@ -174,6 +181,14 @@ class SemanticDedupBenchmark:
             if self.config.enable_margin:
                 options.semantic_margin_enabled = True
                 options.semantic_margin_threshold = self.config.margin_threshold
+
+            # Configure judge LLM if enabled (Prometheus 2 for gray zone evaluation)
+            if self.config.enable_judge:
+                options.semantic_judge_enabled = True
+                options.semantic_judge_model_path = str(self._get_judge_model_path())
+                options.semantic_judge_threshold = self.config.judge_threshold
+                options.semantic_judge_context_size = self.config.judge_context_size
+                options.semantic_judge_gpu_layers = self.config.judge_gpu_layers
 
             store = prestige.Store.open(str(store_path), options)
 
@@ -358,6 +373,47 @@ class SemanticDedupBenchmark:
             f"  - {models_dir}\n"
             f"Please download the BGE reranker from Hugging Face:\n"
             f"  https://huggingface.co/BAAI/bge-reranker-v2-m3"
+        )
+
+    def _get_judge_model_path(self) -> Path:
+        """Get path to judge LLM model (Prometheus 2).
+
+        Returns:
+            Path to GGUF model file
+
+        Raises:
+            FileNotFoundError: If judge model not found
+        """
+        # Look for GGUF model files with various quantization levels
+        model_dir_name = self.config.judge_model
+        gguf_patterns = [
+            "*.gguf",
+            "*.Q4_K_M.gguf",
+            "*.Q5_K_M.gguf",
+            "*.Q8_0.gguf",
+            "model.gguf",
+        ]
+
+        search_dirs = [
+            self.config.cache_dir / "models" / model_dir_name,
+            Path.home() / ".cache" / "prestige" / "models" / model_dir_name,
+            Path(__file__).parent.parent.parent / "models" / model_dir_name,
+        ]
+
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                for pattern in gguf_patterns:
+                    matches = list(search_dir.glob(pattern))
+                    if matches:
+                        return matches[0]
+
+        raise FileNotFoundError(
+            f"Judge LLM model not found: {model_dir_name}\n"
+            f"Searched locations:\n"
+            + "\n".join(f"  - {d}" for d in search_dirs) +
+            f"\n\nPlease download Prometheus 2 from Hugging Face:\n"
+            f"  https://huggingface.co/prometheus-eval/prometheus-7b-v2.0\n"
+            f"\nRecommended: Download a GGUF quantized version for efficient inference."
         )
 
 

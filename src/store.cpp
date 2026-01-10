@@ -27,6 +27,7 @@
 #include <prestige/embedder.hpp>
 #include <prestige/vector_index.hpp>
 #include <prestige/reranker.hpp>
+#include <prestige/judge_llm.hpp>
 #endif
 
 namespace prestige {
@@ -355,6 +356,30 @@ rocksdb::Status Store::Open(const std::string& db_path,
           store->Close();
           return rocksdb::Status::InvalidArgument(
               "Failed to create reranker: " + reranker_error);
+        }
+      }
+    }
+
+    // Initialize judge LLM if enabled (for gray zone evaluation)
+    if (opt.semantic_judge_enabled) {
+      if (opt.custom_judge) {
+        // Use provided custom judge (takes ownership)
+        store->judge_llm_.reset(opt.custom_judge);
+      } else if (!opt.semantic_judge_model_path.empty()) {
+        // Create Prometheus 2 judge from model path
+        std::string judge_error;
+        store->judge_llm_ = internal::CreateJudgeLLM(
+            opt.semantic_judge_model_path,
+            opt.semantic_judge_num_threads,
+            opt.semantic_judge_context_size,
+            opt.semantic_judge_gpu_layers,
+            opt.semantic_judge_max_tokens,
+            &judge_error);
+
+        if (!store->judge_llm_) {
+          store->Close();
+          return rocksdb::Status::InvalidArgument(
+              "Failed to create judge LLM: " + judge_error);
         }
       }
     }
@@ -1861,6 +1886,15 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
           cs.stored_embedding.assign(stored, stored + dim);
         }
         scored_candidates.push_back(std::move(cs));
+      } else if (opt_.semantic_judge_enabled && judge_llm_ &&
+                 cos_sim >= opt_.semantic_judge_threshold) {
+        // Gray zone candidate: above judge threshold but below semantic threshold
+        // Will be evaluated by judge LLM if no above-threshold matches found
+        CandidateScore cs;
+        cs.object_id = candidate.object_id;
+        cs.cos_sim = cos_sim;
+        cs.stored_embedding.assign(stored, stored + dim);
+        scored_candidates.push_back(std::move(cs));
       }
     }
 
@@ -1955,18 +1989,50 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       }
 
       if (accept) {
-        matched_obj_id = best.object_id;
-        best_score = best.cos_sim;
-        dedup_hit_final = true;
-        EmitCounter(opt_, "prestige.semantic.hit_total", 1);
-        EmitCounter(opt_, "prestige.semantic.exact_verified", 1);
-        if (opt_.semantic_rnn_enabled) {
-          EmitCounter(opt_, "prestige.semantic.rnn_accepted", 1);
+        // Check if this is a gray zone candidate that needs judge evaluation
+        if (best.cos_sim < opt_.semantic_threshold &&
+            opt_.semantic_judge_enabled && judge_llm_) {
+          // Gray zone candidate: evaluate with judge LLM
+          const uint64_t judge_start_us = prestige::internal::NowMicros();
+
+          // Retrieve the candidate's text for judge evaluation
+          std::string candidate_bytes;
+          rocksdb::Status s = db_->Get(ro_snap, objects_cf_,
+                                       rocksdb::Slice(best.object_id),
+                                       &candidate_bytes);
+          if (s.ok()) {
+            bool is_duplicate = JudgeCandidate(value_bytes, candidate_bytes, best.cos_sim);
+            EmitHistogram(opt_, "prestige.semantic.judge_us",
+                          prestige::internal::NowMicros() - judge_start_us);
+
+            if (is_duplicate) {
+              matched_obj_id = best.object_id;
+              best_score = best.cos_sim;
+              dedup_hit_final = true;
+              EmitCounter(opt_, "prestige.semantic.hit_total", 1);
+              EmitCounter(opt_, "prestige.semantic.judge_accepted", 1);
+              break;
+            } else {
+              EmitCounter(opt_, "prestige.semantic.judge_rejected", 1);
+              // Judge said not a duplicate, continue to next candidate
+              continue;
+            }
+          }
+        } else {
+          // Above threshold candidate: accept directly
+          matched_obj_id = best.object_id;
+          best_score = best.cos_sim;
+          dedup_hit_final = true;
+          EmitCounter(opt_, "prestige.semantic.hit_total", 1);
+          EmitCounter(opt_, "prestige.semantic.exact_verified", 1);
+          if (opt_.semantic_rnn_enabled) {
+            EmitCounter(opt_, "prestige.semantic.rnn_accepted", 1);
+          }
+          if (opt_.semantic_margin_enabled) {
+            EmitCounter(opt_, "prestige.semantic.margin_accepted", 1);
+          }
+          break;
         }
-        if (opt_.semantic_margin_enabled) {
-          EmitCounter(opt_, "prestige.semantic.margin_accepted", 1);
-        }
-        break;
       }
     }
   } else {
@@ -2290,8 +2356,36 @@ std::string Store::RerankCandidates(std::string_view query_text,
   if (best_score_out) {
     *best_score_out = best_score;
   }
-  
+
   return best_match_id;
+}
+
+bool Store::JudgeCandidate(std::string_view query_text,
+                           std::string_view candidate_text,
+                           float similarity_score) const {
+  if (!judge_llm_) {
+    return false;
+  }
+
+  // Truncate texts if they exceed judge's max length
+  size_t max_len = judge_llm_->MaxTextLength();
+  std::string_view truncated_query = query_text.substr(0, std::min(query_text.size(), max_len));
+  std::string_view truncated_candidate = candidate_text.substr(0, std::min(candidate_text.size(), max_len));
+
+  // Call the judge LLM
+  auto result = judge_llm_->Judge(truncated_query, truncated_candidate, similarity_score);
+
+  if (!result.success) {
+    // Log error and return false (conservative: don't mark as duplicate on error)
+    EmitCounter(opt_, "prestige.semantic.judge_error", 1);
+    return false;
+  }
+
+  // Emit confidence as histogram (scaled to 0-1000 for millis precision)
+  EmitHistogram(opt_, "prestige.semantic.judge_confidence",
+                static_cast<uint64_t>(result.confidence * 1000));
+
+  return result.is_duplicate;
 }
 
 #endif  // PRESTIGE_ENABLE_SEMANTIC

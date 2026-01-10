@@ -204,6 +204,30 @@ void BindOptions(py::module_& m) {
       .def_readwrite("semantic_margin_threshold",
                      &Options::semantic_margin_threshold,
                      "Margin threshold: cos(A,B) - cos(A,2nd) >= margin (default: 0.05)")
+
+      // Judge LLM settings (Prometheus 2 for gray zone evaluation)
+      .def_readwrite("semantic_judge_enabled",
+                     &Options::semantic_judge_enabled,
+                     "Enable judge LLM for gray zone evaluation (default: false)")
+      .def_readwrite("semantic_judge_model_path",
+                     &Options::semantic_judge_model_path,
+                     "Path to judge LLM model (GGUF format, e.g., prometheus-7b-v2.0)")
+      .def_readwrite("semantic_judge_threshold",
+                     &Options::semantic_judge_threshold,
+                     "Min similarity to trigger judge (default: 0.75). "
+                     "Candidates with judge_threshold <= sim < semantic_threshold are evaluated.")
+      .def_readwrite("semantic_judge_num_threads",
+                     &Options::semantic_judge_num_threads,
+                     "Threads for judge LLM inference (default: 0=all)")
+      .def_readwrite("semantic_judge_max_tokens",
+                     &Options::semantic_judge_max_tokens,
+                     "Max tokens for judge response (default: 256)")
+      .def_readwrite("semantic_judge_context_size",
+                     &Options::semantic_judge_context_size,
+                     "Context size for judge LLM (default: 4096)")
+      .def_readwrite("semantic_judge_gpu_layers",
+                     &Options::semantic_judge_gpu_layers,
+                     "GPU layers to offload for judge (0=CPU, -1=all, default: 0)")
 #endif
 
       // Repr

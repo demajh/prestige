@@ -286,3 +286,82 @@ class TestVersion:
     def test_feature_flags(self):
         assert isinstance(prestige.SEMANTIC_AVAILABLE, bool)
         assert isinstance(prestige.SERVER_AVAILABLE, bool)
+
+
+@pytest.mark.skipif(
+    not prestige.SEMANTIC_AVAILABLE,
+    reason="Semantic deduplication not available"
+)
+class TestSemanticOptions:
+    """Test semantic deduplication options including judge LLM."""
+
+    def test_semantic_mode_option(self):
+        options = prestige.Options()
+        assert options.dedup_mode == prestige.DedupMode.EXACT
+        options.dedup_mode = prestige.DedupMode.SEMANTIC
+        assert options.dedup_mode == prestige.DedupMode.SEMANTIC
+
+    def test_semantic_threshold_option(self):
+        options = prestige.Options()
+        options.semantic_threshold = 0.85
+        assert options.semantic_threshold == pytest.approx(0.85)
+
+    def test_judge_enabled_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_enabled is False
+        options.semantic_judge_enabled = True
+        assert options.semantic_judge_enabled is True
+
+    def test_judge_threshold_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_threshold == pytest.approx(0.75)
+        options.semantic_judge_threshold = 0.80
+        assert options.semantic_judge_threshold == pytest.approx(0.80)
+
+    def test_judge_model_path_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_model_path == ""
+        options.semantic_judge_model_path = "/path/to/prometheus.gguf"
+        assert options.semantic_judge_model_path == "/path/to/prometheus.gguf"
+
+    def test_judge_context_size_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_context_size == 4096
+        options.semantic_judge_context_size = 8192
+        assert options.semantic_judge_context_size == 8192
+
+    def test_judge_gpu_layers_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_gpu_layers == 0
+        options.semantic_judge_gpu_layers = -1  # All layers to GPU
+        assert options.semantic_judge_gpu_layers == -1
+
+    def test_judge_num_threads_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_num_threads == 0  # 0 = all cores
+        options.semantic_judge_num_threads = 4
+        assert options.semantic_judge_num_threads == 4
+
+    def test_judge_max_tokens_option(self):
+        options = prestige.Options()
+        assert options.semantic_judge_max_tokens == 256
+        options.semantic_judge_max_tokens = 512
+        assert options.semantic_judge_max_tokens == 512
+
+    def test_rnn_enabled_option(self):
+        options = prestige.Options()
+        assert options.semantic_rnn_enabled is False
+        options.semantic_rnn_enabled = True
+        assert options.semantic_rnn_enabled is True
+
+    def test_margin_enabled_option(self):
+        options = prestige.Options()
+        assert options.semantic_margin_enabled is False
+        options.semantic_margin_enabled = True
+        assert options.semantic_margin_enabled is True
+
+    def test_margin_threshold_option(self):
+        options = prestige.Options()
+        assert options.semantic_margin_threshold == pytest.approx(0.05)
+        options.semantic_margin_threshold = 0.10
+        assert options.semantic_margin_threshold == pytest.approx(0.10)

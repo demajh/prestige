@@ -56,6 +56,7 @@ namespace internal {
 class Embedder;
 class VectorIndex;
 class Reranker;
+class JudgeLLM;
 struct SearchResult;  // From vector_index.hpp
 }  // namespace internal
 
@@ -307,6 +308,45 @@ struct Options {
   internal::Reranker* custom_reranker = nullptr;
 
   // ---------------------------------------------------------------------------
+  // Judge LLM settings (for evaluating borderline matches using Prometheus 2)
+  // ---------------------------------------------------------------------------
+
+  // Enable judge LLM for evaluating potential matches in the "gray zone".
+  // When enabled, candidates with similarity >= semantic_judge_threshold
+  // but < semantic_threshold are evaluated by a judge LLM (Prometheus 2)
+  // to make the final dedup decision.
+  bool semantic_judge_enabled = false;
+
+  // Path to judge LLM model file (e.g., prometheus-7b-v2.0 GGUF)
+  // Supports GGUF format for efficient local inference via llama.cpp
+  std::string semantic_judge_model_path;
+
+  // Minimum similarity threshold to trigger judge evaluation [0.0, 1.0]
+  // Candidates with: judge_threshold <= similarity < semantic_threshold
+  // will be sent to the judge LLM for evaluation.
+  // Set this lower than semantic_threshold to define the "gray zone".
+  // Example: semantic_threshold=0.90, judge_threshold=0.75 means
+  // the judge evaluates candidates with 0.75 <= similarity < 0.90
+  float semantic_judge_threshold = 0.75f;
+
+  // Number of threads for judge LLM inference (0 = use all cores)
+  int semantic_judge_num_threads = 0;
+
+  // Maximum tokens for judge LLM response
+  int semantic_judge_max_tokens = 256;
+
+  // Context size for judge LLM (default: 4096 for 7B models)
+  int semantic_judge_context_size = 4096;
+
+  // GPU layers to offload for judge LLM (0 = CPU only, -1 = all layers)
+  int semantic_judge_gpu_layers = 0;
+
+  // Custom judge LLM for testing (optional)
+  // If provided, semantic_judge_model_path is ignored
+  // The Store takes ownership of this pointer
+  internal::JudgeLLM* custom_judge = nullptr;
+
+  // ---------------------------------------------------------------------------
   // Reciprocal Nearest Neighbor (RNN) + Margin Gating settings
   // These are fast false-positive reduction techniques that don't need a reranker.
   // ---------------------------------------------------------------------------
@@ -545,13 +585,19 @@ class Store {
   std::unique_ptr<internal::Embedder> embedder_;
   std::unique_ptr<internal::VectorIndex> vector_index_;
   std::unique_ptr<internal::Reranker> reranker_;  // Optional reranker for two-stage retrieval
+  std::unique_ptr<internal::JudgeLLM> judge_llm_;  // Optional judge LLM for gray zone evaluation
   std::string vector_index_path_;  // Path to vector index file
   uint64_t semantic_inserts_since_save_ = 0;  // For periodic index saves
-  
+
   // Private helper for reranking candidates
   std::string RerankCandidates(std::string_view query_text,
                                const std::vector<internal::SearchResult>& candidates,
                                float* best_score_out) const;
+
+  // Private helper for judge LLM evaluation of gray zone candidates
+  bool JudgeCandidate(std::string_view query_text,
+                      std::string_view candidate_text,
+                      float similarity_score) const;
 #endif
 };
 

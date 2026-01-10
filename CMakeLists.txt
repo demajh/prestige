@@ -99,6 +99,7 @@ if(PRESTIGE_ENABLE_SEMANTIC)
     src/tokenizer.cpp
     src/vector_index.cpp
     src/reranker.cpp
+    src/judge_llm.cpp
   )
 endif()
 
@@ -316,6 +317,7 @@ if(PRESTIGE_BUILD_TESTS)
     tests/integration_test.cpp
     tests/semantic_test.cpp
     tests/reranker_test.cpp
+    tests/judge_test.cpp
     tests/crash_test.cpp
   )
 

@@ -140,6 +140,34 @@ def cli():
     default=0.05,
     help="Margin threshold: cos(A,B) - cos(A,2nd) >= margin (default: 0.05)",
 )
+@click.option(
+    "--enable-judge",
+    is_flag=True,
+    help="Enable judge LLM (Prometheus 2) for gray zone evaluation",
+)
+@click.option(
+    "--judge-model",
+    default="prometheus-7b-v2.0",
+    help="Judge LLM model name (default: prometheus-7b-v2.0)",
+)
+@click.option(
+    "--judge-threshold",
+    type=float,
+    default=0.75,
+    help="Min similarity to trigger judge evaluation [0.0-1.0] (default: 0.75)",
+)
+@click.option(
+    "--judge-context-size",
+    type=int,
+    default=4096,
+    help="Context size for judge LLM (default: 4096)",
+)
+@click.option(
+    "--judge-gpu-layers",
+    type=int,
+    default=0,
+    help="GPU layers for judge LLM (0=CPU, -1=all to GPU, default: 0)",
+)
 def run(
     datasets: str,
     thresholds: str,
@@ -160,6 +188,11 @@ def run(
     rnn_k: int,
     enable_margin: bool,
     margin_threshold: float,
+    enable_judge: bool,
+    judge_model: str,
+    judge_threshold: float,
+    judge_context_size: int,
+    judge_gpu_layers: int,
 ):
     """Run semantic deduplication benchmarks.
 
@@ -209,6 +242,11 @@ def run(
             click.echo(f"RNN k: {rnn_k if rnn_k > 0 else 'auto'}")
         if enable_margin:
             click.echo(f"Margin Threshold: {margin_threshold}")
+        if enable_judge:
+            click.echo(f"Judge LLM: {judge_model}")
+            click.echo(f"Judge Threshold: {judge_threshold}")
+            click.echo(f"Judge Context: {judge_context_size}")
+            click.echo(f"Judge GPU Layers: {judge_gpu_layers}")
         click.echo("=" * 60)
 
     # Run benchmarks for each dataset
@@ -245,6 +283,11 @@ def run(
             rnn_k=rnn_k,
             enable_margin=enable_margin,
             margin_threshold=margin_threshold,
+            enable_judge=enable_judge,
+            judge_model=judge_model,
+            judge_threshold=judge_threshold,
+            judge_context_size=judge_context_size,
+            judge_gpu_layers=judge_gpu_layers,
         )
 
         # Run benchmark
