@@ -32,6 +32,7 @@ option(PRESTIGE_BUILD_PYTHON "Build Python bindings (requires pybind11)" OFF)
 option(PRESTIGE_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(PRESTIGE_ENABLE_SEMANTIC "Enable semantic deduplication (requires ONNX Runtime)" OFF)
 option(PRESTIGE_USE_FAISS "Enable FAISS backend for semantic dedup (requires FAISS)" OFF)
+option(PRESTIGE_ENABLE_LLAMA "Enable LLM judge via llama.cpp (for semantic gray zone evaluation)" OFF)
 
 # --- Find RocksDB ---
 # This is intentionally simple. In production, you might prefer pkg-config or a dedicated FindRocksDB.cmake.
@@ -83,6 +84,22 @@ if(PRESTIGE_ENABLE_SEMANTIC)
   if(PRESTIGE_USE_FAISS)
     find_package(faiss REQUIRED)
     message(STATUS "FAISS found")
+  endif()
+
+  # Optional llama.cpp support for judge LLM
+  if(PRESTIGE_ENABLE_LLAMA)
+    FetchContent_Declare(llama_cpp
+      GIT_REPOSITORY https://github.com/ggerganov/llama.cpp.git
+      GIT_TAG b4458
+    )
+    # Set llama.cpp build options
+    set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(GGML_CUDA ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(llama_cpp)
+    message(STATUS "llama.cpp fetched: ${llama_cpp_SOURCE_DIR}")
   endif()
 endif()
 
@@ -136,6 +153,29 @@ if(PRESTIGE_ENABLE_SEMANTIC)
     PUBLIC
       PRESTIGE_ENABLE_SEMANTIC=1
   )
+
+  # llama.cpp includes and libraries
+  if(PRESTIGE_ENABLE_LLAMA)
+    target_include_directories(prestige_uvs
+      PRIVATE
+        $<BUILD_INTERFACE:${llama_cpp_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${llama_cpp_SOURCE_DIR}/ggml/include>
+    )
+    find_package(CUDAToolkit REQUIRED)
+    target_link_libraries(prestige_uvs
+      PRIVATE
+        llama
+        ggml
+        ggml-cuda
+        CUDA::cudart
+        CUDA::cublas
+        CUDA::cublasLt
+    )
+    target_compile_definitions(prestige_uvs
+      PUBLIC
+        PRESTIGE_ENABLE_LLAMA=1
+    )
+  endif()
 
   if(PRESTIGE_USE_FAISS)
     target_link_libraries(prestige_uvs PUBLIC faiss)
@@ -260,11 +300,14 @@ configure_package_config_file(
   INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/prestige_uvs
 )
 
-install(EXPORT prestige_uvsTargets
-  FILE prestige_uvsTargets.cmake
-  NAMESPACE prestige::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/prestige_uvs
-)
+# Skip export when llama.cpp is enabled (it doesn't export its targets properly)
+if(NOT PRESTIGE_ENABLE_LLAMA)
+  install(EXPORT prestige_uvsTargets
+    FILE prestige_uvsTargets.cmake
+    NAMESPACE prestige::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/prestige_uvs
+  )
+endif()
 
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/prestige_uvsConfig.cmake"

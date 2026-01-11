@@ -87,7 +87,7 @@ ParsedResponse ParseJudgeResponse(const std::string& response) {
     // Use score as fallback for duplicate decision if DUPLICATE not found
     if (!result.valid) {
       result.valid = true;
-      result.is_duplicate = (result.score >= 4);
+      result.is_duplicate = (result.score >= 5);  // Require strong semantic match for high precision
     }
   }
 
@@ -143,7 +143,7 @@ class Prometheus2Judge::Impl {
       llama_free(ctx_);
     }
     if (model_) {
-      llama_free_model(model_);
+      llama_model_free(model_);
     }
   }
 
@@ -156,7 +156,7 @@ class Prometheus2Judge::Impl {
     model_params.n_gpu_layers = gpu_layers_;
 
     // Load the model
-    model_ = llama_load_model_from_file(model_path.c_str(), model_params);
+    model_ = llama_model_load_from_file(model_path.c_str(), model_params);
     if (!model_) {
       if (error_out) {
         *error_out = "Failed to load model from: " + model_path;
@@ -176,7 +176,7 @@ class Prometheus2Judge::Impl {
       if (error_out) {
         *error_out = "Failed to create llama context";
       }
-      llama_free_model(model_);
+      llama_model_free(model_);
       model_ = nullptr;
       return false;
     }
@@ -218,10 +218,14 @@ class Prometheus2Judge::Impl {
 
     // Create batch for prompt processing
     llama_batch batch = llama_batch_init(n_tokens, 0, 1);
+    batch.n_tokens = n_tokens;
     for (int i = 0; i < n_tokens; ++i) {
-      llama_batch_add(batch, tokens[i], i, {0}, false);
+      batch.token[i] = tokens[i];
+      batch.pos[i] = i;
+      batch.n_seq_id[i] = 1;
+      batch.seq_id[i][0] = 0;
+      batch.logits[i] = (i == n_tokens - 1);  // Enable logits for last token only
     }
-    batch.logits[batch.n_tokens - 1] = true;  // Enable logits for last token
 
     // Process prompt
     if (llama_decode(ctx_, batch) != 0) {
@@ -264,7 +268,12 @@ class Prometheus2Judge::Impl {
 
       // Process new token
       llama_batch single_batch = llama_batch_init(1, 0, 1);
-      llama_batch_add(single_batch, new_token, n_cur, {0}, true);
+      single_batch.n_tokens = 1;
+      single_batch.token[0] = new_token;
+      single_batch.pos[0] = n_cur;
+      single_batch.n_seq_id[0] = 1;
+      single_batch.seq_id[0][0] = 0;
+      single_batch.logits[0] = true;
 
       if (llama_decode(ctx_, single_batch) != 0) {
         llama_batch_free(single_batch);
