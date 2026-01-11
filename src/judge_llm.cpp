@@ -87,7 +87,7 @@ ParsedResponse ParseJudgeResponse(const std::string& response) {
     // Use score as fallback for duplicate decision if DUPLICATE not found
     if (!result.valid) {
       result.valid = true;
-      result.is_duplicate = (result.score >= 5);  // Require strong semantic match for high precision
+      result.is_duplicate = (result.score >= min_score_);
     }
   }
 
@@ -132,11 +132,12 @@ std::string FormatPrompt(std::string_view text1, std::string_view text2, float s
 // Implementation class for Prometheus2Judge using llama.cpp
 class Prometheus2Judge::Impl {
  public:
-  Impl(int num_threads, int context_size, int gpu_layers, int max_tokens)
+  Impl(int num_threads, int context_size, int gpu_layers, int max_tokens, int min_score)
       : num_threads_(num_threads),
         context_size_(context_size),
         gpu_layers_(gpu_layers),
-        max_tokens_(max_tokens) {}
+        max_tokens_(max_tokens),
+        min_score_(min_score) {}
 
   ~Impl() {
     if (ctx_) {
@@ -305,6 +306,7 @@ class Prometheus2Judge::Impl {
   int context_size_;
   int gpu_layers_;
   int max_tokens_;
+  int min_score_;
 
   llama_model* model_ = nullptr;
   llama_context* ctx_ = nullptr;
@@ -315,7 +317,7 @@ class Prometheus2Judge::Impl {
 // Stub implementation when llama.cpp is not available
 class Prometheus2Judge::Impl {
  public:
-  Impl(int, int, int, int) {}
+  Impl(int, int, int, int, int) {}
   ~Impl() = default;
 
   bool Initialize(const std::string&, std::string* error_out) {
@@ -333,12 +335,13 @@ class Prometheus2Judge::Impl {
 #endif  // HAVE_LLAMA
 
 // Prometheus2Judge implementation (shared between llama and stub)
-Prometheus2Judge::Prometheus2Judge(int num_threads, int context_size, int gpu_layers, int max_tokens)
-    : impl_(std::make_unique<Impl>(num_threads, context_size, gpu_layers, max_tokens)),
+Prometheus2Judge::Prometheus2Judge(int num_threads, int context_size, int gpu_layers, int max_tokens, int min_score)
+    : impl_(std::make_unique<Impl>(num_threads, context_size, gpu_layers, max_tokens, min_score)),
       num_threads_(num_threads),
       context_size_(context_size),
       gpu_layers_(gpu_layers),
-      max_tokens_(max_tokens) {}
+      max_tokens_(max_tokens),
+      min_score_(min_score) {}
 
 Prometheus2Judge::~Prometheus2Judge() = default;
 
@@ -359,9 +362,10 @@ std::unique_ptr<JudgeLLM> CreateJudgeLLM(
     int context_size,
     int gpu_layers,
     int max_tokens,
+    int min_score,
     std::string* error_out) {
   auto judge = std::make_unique<Prometheus2Judge>(
-      num_threads, context_size, gpu_layers, max_tokens);
+      num_threads, context_size, gpu_layers, max_tokens, min_score);
 
   if (!judge->Initialize(model_path, error_out)) {
     return nullptr;
@@ -377,7 +381,7 @@ std::unique_ptr<JudgeLLM> CreateJudgeLLM(
 // Stub implementation when semantic features are disabled
 namespace prestige::internal {
 
-Prometheus2Judge::Prometheus2Judge(int, int, int, int) {}
+Prometheus2Judge::Prometheus2Judge(int, int, int, int, int) {}
 Prometheus2Judge::~Prometheus2Judge() = default;
 
 bool Prometheus2Judge::Initialize(const std::string&, std::string* error_out) {

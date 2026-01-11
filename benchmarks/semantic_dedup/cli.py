@@ -168,6 +168,12 @@ def cli():
     default=0,
     help="GPU layers for judge LLM (0=CPU, -1=all to GPU, default: 0)",
 )
+@click.option(
+    "--judge-min-score",
+    type=int,
+    default=5,
+    help="Minimum judge score (1-7) to consider duplicate. 4=similar, 5=semantic, 6+=near-exact (default: 5)",
+)
 def run(
     datasets: str,
     thresholds: str,
@@ -193,6 +199,7 @@ def run(
     judge_threshold: float,
     judge_context_size: int,
     judge_gpu_layers: int,
+    judge_min_score: int,
 ):
     """Run semantic deduplication benchmarks.
 
@@ -247,6 +254,7 @@ def run(
             click.echo(f"Judge Threshold: {judge_threshold}")
             click.echo(f"Judge Context: {judge_context_size}")
             click.echo(f"Judge GPU Layers: {judge_gpu_layers}")
+            click.echo(f"Judge Min Score: {judge_min_score}")
         click.echo("=" * 60)
 
     # Run benchmarks for each dataset
@@ -288,6 +296,7 @@ def run(
             judge_threshold=judge_threshold,
             judge_context_size=judge_context_size,
             judge_gpu_layers=judge_gpu_layers,
+            judge_min_score=judge_min_score,
         )
 
         # Run benchmark

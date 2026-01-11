@@ -374,6 +374,7 @@ rocksdb::Status Store::Open(const std::string& db_path,
             opt.semantic_judge_context_size,
             opt.semantic_judge_gpu_layers,
             opt.semantic_judge_max_tokens,
+            opt.semantic_judge_min_score,
             &judge_error);
 
         if (!store->judge_llm_) {

@@ -55,6 +55,7 @@ class BenchmarkConfig:
     judge_threshold: float = 0.75  # Min similarity to trigger judge
     judge_context_size: int = 4096
     judge_gpu_layers: int = 0  # 0 = CPU only, -1 = all layers to GPU
+    judge_min_score: int = 5  # Min score (1-7) to consider duplicate. 5=semantic, 6+=near-exact
 
 
 class SemanticDedupBenchmark:
@@ -189,6 +190,7 @@ class SemanticDedupBenchmark:
                 options.semantic_judge_threshold = self.config.judge_threshold
                 options.semantic_judge_context_size = self.config.judge_context_size
                 options.semantic_judge_gpu_layers = self.config.judge_gpu_layers
+                options.semantic_judge_min_score = self.config.judge_min_score
 
             store = prestige.Store.open(str(store_path), options)
 

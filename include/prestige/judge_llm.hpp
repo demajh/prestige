@@ -76,11 +76,13 @@ class Prometheus2Judge : public JudgeLLM {
    * @param context_size Context window size (default: 4096)
    * @param gpu_layers Number of layers to offload to GPU (0 = CPU only, -1 = all)
    * @param max_tokens Maximum tokens for response generation
+   * @param min_score Minimum score (1-7) to consider texts as duplicates (default: 5)
    */
   explicit Prometheus2Judge(int num_threads = 0,
                             int context_size = 4096,
                             int gpu_layers = 0,
-                            int max_tokens = 256);
+                            int max_tokens = 256,
+                            int min_score = 5);
 
   ~Prometheus2Judge();
 
@@ -109,6 +111,7 @@ class Prometheus2Judge : public JudgeLLM {
   int context_size_ = 4096;
   int gpu_layers_ = 0;
   int max_tokens_ = 256;
+  int min_score_ = 5;
 };
 
 /**
@@ -119,6 +122,7 @@ class Prometheus2Judge : public JudgeLLM {
  * @param context_size Context window size
  * @param gpu_layers GPU layers to offload
  * @param max_tokens Maximum response tokens
+ * @param min_score Minimum score (1-7) to consider texts as duplicates
  * @param error_out Error message output
  * @return JudgeLLM instance or nullptr on failure
  */
@@ -128,6 +132,7 @@ std::unique_ptr<JudgeLLM> CreateJudgeLLM(
     int context_size = 4096,
     int gpu_layers = 0,
     int max_tokens = 256,
+    int min_score = 5,
     std::string* error_out = nullptr);
 
 }  // namespace prestige::internal

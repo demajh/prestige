@@ -341,6 +341,10 @@ struct Options {
   // GPU layers to offload for judge LLM (0 = CPU only, -1 = all layers)
   int semantic_judge_gpu_layers = 0;
 
+  // Minimum score (1-7) from judge LLM to consider texts as duplicates
+  // 4 = similar with minor differences, 5 = semantic duplicates, 6+ = near-exact
+  int semantic_judge_min_score = 5;
+
   // Custom judge LLM for testing (optional)
   // If provided, semantic_judge_model_path is ignored
   // The Store takes ownership of this pointer

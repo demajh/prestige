@@ -228,6 +228,10 @@ void BindOptions(py::module_& m) {
       .def_readwrite("semantic_judge_gpu_layers",
                      &Options::semantic_judge_gpu_layers,
                      "GPU layers to offload for judge (0=CPU, -1=all, default: 0)")
+      .def_readwrite("semantic_judge_min_score",
+                     &Options::semantic_judge_min_score,
+                     "Minimum judge score (1-7) to consider texts as duplicates. "
+                     "4=similar, 5=semantic duplicates, 6+=near-exact (default: 5)")
 #endif
 
       // Repr
