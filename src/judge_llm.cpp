@@ -59,7 +59,7 @@ struct ParsedResponse {
   std::string reasoning;
 };
 
-ParsedResponse ParseJudgeResponse(const std::string& response) {
+ParsedResponse ParseJudgeResponse(const std::string& response, int min_score) {
   ParsedResponse result;
 
   // Try to extract DUPLICATE field
@@ -84,11 +84,10 @@ ParsedResponse ParseJudgeResponse(const std::string& response) {
       result.confidence = (4 - result.score) / 4.0f;  // Maps 1->0.75, 2->0.5, 3->0.25 (confidence it's NOT a duplicate)
     }
 
-    // Use score as fallback for duplicate decision if DUPLICATE not found
-    if (!result.valid) {
-      result.valid = true;
-      result.is_duplicate = (result.score >= min_score_);
-    }
+    // Override duplicate decision based on min_score threshold
+    // This takes precedence over the LLM's YES/NO response
+    result.is_duplicate = (result.score >= min_score);
+    result.valid = true;
   }
 
   // Extract reasoning
@@ -286,7 +285,7 @@ class Prometheus2Judge::Impl {
     }
 
     // Parse the response
-    ParsedResponse parsed = ParseJudgeResponse(response);
+    ParsedResponse parsed = ParseJudgeResponse(response, min_score_);
 
     if (!parsed.valid) {
       result.error_message = "Failed to parse judge response: " + response;
