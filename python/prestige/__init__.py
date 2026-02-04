@@ -114,3 +114,12 @@ __all__ = [
 # Add semantic types to __all__ if available
 if SEMANTIC_AVAILABLE:
     __all__.extend(["SemanticModel", "SemanticIndexType", "SemanticPooling", "SemanticDevice"])
+
+# Dataloaders subpackage for ML training integration
+# Import is lazy to avoid requiring torch/datasets when not needed
+try:
+    from . import dataloaders
+    DATALOADERS_AVAILABLE = True
+    __all__.append("dataloaders")
+except ImportError:
+    DATALOADERS_AVAILABLE = False

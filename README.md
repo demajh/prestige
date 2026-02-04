@@ -127,6 +127,25 @@ curl http://localhost:8080/health/ready
 
 See [docs/server.md](docs/server.md) for full API reference and configuration options.
 
+### ML Training Dataloaders
+
+prestige provides deduplicated dataloaders for PyTorch and HuggingFace:
+
+```python
+from datasets import load_dataset
+from prestige.dataloaders import deduplicate_dataset, detect_train_test_leakage
+
+# Load and deduplicate a dataset
+ds = load_dataset("wikitext", "wikitext-2-raw-v1")
+deduped = deduplicate_dataset(ds["train"], mode="semantic", threshold=0.9)
+
+# Check for train/test contamination
+results = detect_train_test_leakage(train_ds, test_ds, threshold=0.95)
+print(f"Contamination rate: {results['contamination_rate']:.2%}")
+```
+
+See [docs/dataloaders.md](docs/dataloaders.md) for full documentation.
+
 ## Documentation
 
 | Document | Description |
@@ -136,6 +155,7 @@ See [docs/server.md](docs/server.md) for full API reference and configuration op
 | [Building](docs/building.md) | Build instructions and dependencies |
 | [HTTP Server](docs/server.md) | REST API server reference |
 | [Python Bindings](docs/python-bindings.md) | Python API reference and examples |
+| [ML Dataloaders](docs/dataloaders.md) | Deduplicated dataloaders for training |
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |
