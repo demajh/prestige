@@ -161,15 +161,6 @@ See [docs/dataloaders.md](docs/dataloaders.md) for full documentation.
 | [Normalization](docs/normalization.md) | Text normalization options |
 | [Observability](docs/observability.md) | Metrics and tracing |
 
-## Roadmap
-
-- End-to-end RAG examples + benchmark harness
-- Public embedding-cache functions: `GetEmbedding*`, `PutEmbedding*`, and metadata access (dims/dtype/model fingerprint), ideally via an `EmbeddingCache` wrapper atop the generic store.
-- Concurrency: "inflight" reservation/lease support so multiple workers don't double-embed the same missing chunk.
-- Batch APIs: `PutMany`, `GetMany`, `DeleteMany` (and batch variants for dedup-key operations) to amortize transaction cost and match embedding-provider batching.
-- Model/version-aware cache keys + binary embedding format + metadata (dims/dtype/etc.), and a configurable "bring your own embedder" interface so users can plug in OpenAI/Cohere/local/ONNX/etc.
-- Explicit dedup-key operations (pre-embed lookup): e.g., `GetByDedupKey`, `PutByDedupKey`, and (optionally) `Link(alias_key -> dedup_key)` so you dedup *before* computing embeddings.
-
 ## License
 
 Apache 2.0
