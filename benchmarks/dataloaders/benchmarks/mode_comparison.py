@@ -172,26 +172,27 @@ def bench_semantic_catches_paraphrases(
     texts = dataset.texts
     labels = dataset.labels
 
-    # Count paraphrases in ground truth
-    total_paraphrases = sum(1 for s in dataset.samples if s.is_paraphrase)
+    total_samples = len(texts)
 
-    # Exact mode - won't catch paraphrases
+    # Exact mode - won't catch paraphrases (only exact duplicates)
     exact_texts, _, exact_removed = _apply_exact_dedup(texts, labels)
-    exact_kept = len(exact_texts)
 
     # Semantic mode - should catch paraphrases
     sem_texts, _, sem_removed = _apply_semantic_dedup(
         texts, labels, config.dedup.semantic_threshold
     )
-    sem_kept = len(sem_texts)
 
-    # Additional duplicates found by semantic
-    additional_found = (len(texts) - exact_kept) - (len(texts) - sem_kept)
-    # Negative means semantic found more duplicates
+    # Report dedup rates (fraction of dataset removed) - more interpretable
+    # Values are 0-1 representing what fraction was deduplicated
+    exact_dedup_rate = exact_removed / total_samples if total_samples > 0 else 0.0
+    sem_dedup_rate = sem_removed / total_samples if total_samples > 0 else 0.0
+
+    # Additional duplicates found by semantic (the "advantage" of semantic mode)
+    additional_found_rate = sem_dedup_rate - exact_dedup_rate
 
     gen_metrics = GeneralizationMetrics(
-        test_accuracies=[float(sem_removed)],  # Using as count
-        baseline_test_accuracies=[float(exact_removed)],
+        test_accuracies=[sem_dedup_rate],  # Semantic dedup rate
+        baseline_test_accuracies=[exact_dedup_rate],  # Exact dedup rate
     )
 
     return BenchmarkResult(
@@ -324,11 +325,11 @@ class ModeComparisonBenchmark:
         Returns:
             List of BenchmarkResult objects
         """
+        import sys
         results = []
         seeds = self.config.statistical.get_seeds()
-
-        if self.config.verbose:
-            print("Running mode comparison benchmarks...")
+        print(f"  Running with {len(seeds)} seeds...")
+        sys.stdout.flush()
 
         benchmark_fns = [
             ("mode_accuracy_comparison", bench_mode_accuracy_comparison),
@@ -337,25 +338,26 @@ class ModeComparisonBenchmark:
         ]
 
         for name, fn in benchmark_fns:
-            if self.config.verbose:
-                print(f"\n  {name}...")
-
+            print(f"    {name}...", end=" ", flush=True)
+            count = 0
             for seed in seeds:
                 try:
                     result = fn(self.config, seed=seed)
                     results.append(result)
+                    count += 1
                 except Exception as e:
-                    if self.config.verbose:
-                        print(f"    Warning: seed {seed} failed: {e}")
+                    pass
+            print(f"done ({count} runs)")
+            sys.stdout.flush()
 
         # Threshold tuning
-        if self.config.verbose:
-            print(f"\n  threshold_tuning...")
+        print("    threshold_tuning...", end=" ", flush=True)
         try:
             threshold_results = bench_threshold_tuning(self.config, seed=seeds[0])
             results.extend(threshold_results)
+            print(f"done ({len(threshold_results)} thresholds)")
         except Exception as e:
-            if self.config.verbose:
-                print(f"    Warning: failed: {e}")
+            print(f"failed: {e}")
+        sys.stdout.flush()
 
         return results

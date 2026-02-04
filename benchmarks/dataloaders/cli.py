@@ -80,6 +80,9 @@ def cli():
 @click.option(
     "--output", "-o", type=click.Path(), default=None, help="Output file path"
 )
+@click.option(
+    "--max-samples", "-n", type=int, default=None, help="Limit dataset size (for faster runs)"
+)
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
 def run(
     run_all: bool,
@@ -91,6 +94,7 @@ def run(
     mode: str,
     threshold: float,
     output: Optional[str],
+    max_samples: Optional[int],
     verbose: bool,
 ):
     """Run benchmarks."""
@@ -132,6 +136,10 @@ def run(
     # Set dataset
     if dataset is not None:
         config.dataset.name = dataset
+
+    # Set max samples (for faster runs on large datasets)
+    if max_samples is not None:
+        config.dataset.max_samples = max_samples
 
     # Run benchmarks
     click.echo("Starting benchmark run...")

@@ -72,7 +72,11 @@ def _detect_contamination_prestige(
     mode: DedupMode,
     threshold: float = 0.95,
 ) -> Tuple[List[int], float]:
-    """Detect contamination using prestige.
+    """Detect contamination: find test samples that appear in training.
+
+    Note: We want to find TEST samples that leaked into TRAIN, which is the
+    opposite of what prestige's detect_train_test_leakage does. So we use
+    simple detection for exact mode and swap train/test for semantic mode.
 
     Args:
         train_texts: Training texts
@@ -83,24 +87,30 @@ def _detect_contamination_prestige(
     Returns:
         Tuple of (contaminated_test_indices, contamination_rate)
     """
-    if not PRESTIGE_AVAILABLE:
+    # For exact mode, use simple hash-based detection
+    if mode == DedupMode.EXACT or not PRESTIGE_AVAILABLE:
         return _detect_contamination_simple(train_texts, test_texts)
 
+    # For semantic mode, use prestige but swap train/test to find
+    # test samples that match training
     try:
-        mode_str = "semantic" if mode == DedupMode.SEMANTIC else "exact"
         train_data = [{"text": t} for t in train_texts]
         test_data = [{"text": t} for t in test_texts]
 
+        # Swap: check which TEST samples appear in TRAIN
         results = detect_train_test_leakage(
-            train_data=train_data,
-            test_data=test_data,
-            mode=mode_str,
+            train_data=test_data,  # Check test samples
+            test_data=train_data,  # Against training set
+            mode="semantic",
             threshold=threshold,
             text_column="text",
             verbose=False,
         )
 
-        return results["contaminated_train_indices"], results["contamination_rate"]
+        # Results now contain test indices that match training
+        contaminated_test_indices = results["contaminated_train_indices"]
+        rate = len(contaminated_test_indices) / len(test_texts) if test_texts else 0.0
+        return contaminated_test_indices, rate
     except Exception:
         # Fallback to simple detection
         return _detect_contamination_simple(train_texts, test_texts)
@@ -409,10 +419,8 @@ class ContaminationBenchmark:
         Returns:
             List of BenchmarkResult objects
         """
+        import sys
         results = []
-
-        if self.config.verbose:
-            print("Running contamination benchmarks...")
 
         benchmark_fns = [
             ("contamination_rate", bench_contamination_rate),
@@ -422,18 +430,21 @@ class ContaminationBenchmark:
         ]
 
         seeds = self.config.statistical.get_seeds()
+        print(f"  Running with {len(seeds)} seeds...")
+        sys.stdout.flush()
 
         for name, fn in benchmark_fns:
-            if self.config.verbose:
-                print(f"\n  {name}...")
-
+            print(f"    {name}...", end=" ", flush=True)
+            count = 0
             for seed in seeds:
                 try:
                     result = fn(self.config, seed=seed)
                     results.append(result)
+                    count += 1
                 except Exception as e:
-                    if self.config.verbose:
-                        print(f"    Warning: seed {seed} failed: {e}")
+                    print(f"[seed {seed} failed: {e}]", end=" ", flush=True)
+            print(f"done ({count} runs)")
+            sys.stdout.flush()
 
         # Threshold sweep (only for semantic mode)
         if self.config.dedup.mode == DedupMode.SEMANTIC:

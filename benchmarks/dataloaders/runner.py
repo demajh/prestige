@@ -70,10 +70,12 @@ class BenchmarkRunner:
             ]
 
         for category in categories:
-            if self.config.verbose:
-                print(f"\n{'='*60}")
-                print(f"Running {category.value} benchmarks")
-                print(f"{'='*60}")
+            # Always show progress for --all runs
+            print(f"\n{'='*60}")
+            print(f"Running {category.value} benchmarks...")
+            print(f"{'='*60}")
+            import sys
+            sys.stdout.flush()
 
             if category == BenchmarkCategory.GENERALIZATION:
                 self._run_generalization_benchmarks()
@@ -173,6 +175,19 @@ class BenchmarkRunner:
 
         return output_path
 
+    def _to_python_type(self, val: Any) -> Any:
+        """Convert numpy types to Python native types for JSON serialization."""
+        import numpy as np
+        if isinstance(val, (np.bool_, np.generic)):
+            return val.item()
+        if isinstance(val, np.ndarray):
+            return val.tolist()
+        if isinstance(val, dict):
+            return {k: self._to_python_type(v) for k, v in val.items()}
+        if isinstance(val, list):
+            return [self._to_python_type(v) for v in val]
+        return val
+
     def _result_to_dict(self, result: BenchmarkResult) -> Dict[str, Any]:
         """Convert BenchmarkResult to serializable dictionary."""
         d = {
@@ -256,7 +271,8 @@ class BenchmarkRunner:
         if result.processing_time_sec is not None:
             d["processing_time_sec"] = result.processing_time_sec
 
-        return d
+        # Convert all numpy types to Python native types
+        return self._to_python_type(d)
 
     def _config_to_dict(self) -> Dict[str, Any]:
         """Convert config to serializable dictionary."""

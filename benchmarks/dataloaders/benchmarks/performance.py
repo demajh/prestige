@@ -308,40 +308,40 @@ class PerformanceBenchmark:
         Returns:
             List of BenchmarkResult objects
         """
+        import sys
         results = []
         seed = self.config.statistical.base_seed
-
-        if self.config.verbose:
-            print("Running performance benchmarks (secondary)...")
+        print("  Running performance benchmarks (secondary)...")
+        sys.stdout.flush()
 
         # Throughput
-        if self.config.verbose:
-            print("\n  throughput...")
+        print("    throughput...", end=" ", flush=True)
         try:
             throughput_results = bench_throughput(self.config, seed=seed)
             results.extend(throughput_results)
+            print(f"done ({len(throughput_results)} sizes)")
         except Exception as e:
-            if self.config.verbose:
-                print(f"    Warning: failed: {e}")
+            print(f"failed: {e}")
+        sys.stdout.flush()
 
         # Memory
-        if self.config.verbose:
-            print("\n  memory_usage...")
+        print("    memory_usage...", end=" ", flush=True)
         try:
             memory_results = bench_memory_usage(self.config, seed=seed)
             results.extend(memory_results)
+            print(f"done ({len(memory_results)} sizes)")
         except Exception as e:
-            if self.config.verbose:
-                print(f"    Warning: failed: {e}")
+            print(f"failed: {e}")
+        sys.stdout.flush()
 
         # GPU speedup
-        if self.config.verbose:
-            print("\n  gpu_speedup...")
+        print("    gpu_speedup...", end=" ", flush=True)
         try:
             gpu_result = bench_gpu_speedup(self.config, seed=seed)
             results.append(gpu_result)
+            print("done")
         except Exception as e:
-            if self.config.verbose:
-                print(f"    Warning: failed: {e}")
+            print(f"failed: {e}")
+        sys.stdout.flush()
 
         return results

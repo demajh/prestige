@@ -491,24 +491,32 @@ class GeneralizationBenchmark:
         Returns:
             List of BenchmarkResult objects
         """
+        import sys
         results = []
         seeds = self.config.statistical.get_seeds()
 
-        if self.config.verbose:
-            print(f"Running generalization benchmarks with {len(seeds)} seeds...")
+        print(f"  Running with {len(seeds)} seeds on dataset '{self.config.dataset.name}'...")
+        sys.stdout.flush()
 
         # Run each benchmark across seeds
-        benchmark_fns = [
-            ("test_accuracy_with_dedup", bench_test_accuracy_with_dedup),
-            ("overfitting_reduction", bench_overfitting_reduction),
-            ("convergence_speed", bench_convergence_speed),
-            ("sample_efficiency", bench_sample_efficiency),
-            ("cross_validation_variance", bench_cross_validation_variance),
-        ]
+        # Skip slow benchmarks (convergence_speed, cross_validation_variance) in quick mode
+        if self.config.quick_mode:
+            benchmark_fns = [
+                ("test_accuracy_with_dedup", bench_test_accuracy_with_dedup),
+                ("overfitting_reduction", bench_overfitting_reduction),
+                ("sample_efficiency", bench_sample_efficiency),
+            ]
+        else:
+            benchmark_fns = [
+                ("test_accuracy_with_dedup", bench_test_accuracy_with_dedup),
+                ("overfitting_reduction", bench_overfitting_reduction),
+                ("convergence_speed", bench_convergence_speed),
+                ("sample_efficiency", bench_sample_efficiency),
+                ("cross_validation_variance", bench_cross_validation_variance),
+            ]
 
         for name, fn in benchmark_fns:
-            if self.config.verbose:
-                print(f"\n  {name}...")
+            print(f"    {name}...", end=" ", flush=True)
 
             seed_results = []
             for seed in seeds:
@@ -516,9 +524,10 @@ class GeneralizationBenchmark:
                     result = fn(self.config, seed=seed)
                     seed_results.append(result)
                 except Exception as e:
-                    if self.config.verbose:
-                        print(f"    Warning: seed {seed} failed: {e}")
+                    print(f"[seed {seed} failed: {e}]", end=" ", flush=True)
 
+            print(f"done ({len(seed_results)} runs)")
+            sys.stdout.flush()
             results.extend(seed_results)
 
         # Run threshold sweep if semantic mode

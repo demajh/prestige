@@ -336,22 +336,21 @@ class DetectionQualityBenchmark:
         Returns:
             List of BenchmarkResult objects
         """
+        import sys
         results = []
-
-        if self.config.verbose:
-            print("Running detection quality benchmarks...")
-
         seeds = self.config.statistical.get_seeds()
+        print(f"  Running with {len(seeds)} seeds...")
+        sys.stdout.flush()
 
         # Precision/recall curve (threshold sweep)
-        if self.config.verbose:
-            print("\n  precision_recall_curve...")
+        print("    precision_recall_curve...", end=" ", flush=True)
         try:
             pr_results = bench_precision_recall_curve(self.config, seed=seeds[0])
             results.extend(pr_results)
+            print(f"done ({len(pr_results)} thresholds)")
         except Exception as e:
-            if self.config.verbose:
-                print(f"    Warning: failed: {e}")
+            print(f"failed: {e}")
+        sys.stdout.flush()
 
         # Other benchmarks
         benchmark_fns = [
@@ -361,26 +360,27 @@ class DetectionQualityBenchmark:
         ]
 
         for name, fn in benchmark_fns:
-            if self.config.verbose:
-                print(f"\n  {name}...")
-
+            print(f"    {name}...", end=" ", flush=True)
+            count = 0
             for seed in seeds:
                 try:
                     result = fn(self.config, seed=seed)
                     results.append(result)
+                    count += 1
                 except Exception as e:
-                    if self.config.verbose:
-                        print(f"    Warning: seed {seed} failed: {e}")
+                    pass
+            print(f"done ({count} runs)")
+            sys.stdout.flush()
 
         # Threshold sensitivity (only for semantic)
         if self.config.dedup.mode == DedupMode.SEMANTIC:
-            if self.config.verbose:
-                print(f"\n  threshold_sensitivity...")
+            print("    threshold_sensitivity...", end=" ", flush=True)
             try:
                 threshold_results = bench_threshold_sensitivity(self.config, seed=seeds[0])
                 results.extend(threshold_results)
+                print(f"done ({len(threshold_results)} thresholds)")
             except Exception as e:
-                if self.config.verbose:
-                    print(f"    Warning: failed: {e}")
+                print(f"failed: {e}")
+            sys.stdout.flush()
 
         return results

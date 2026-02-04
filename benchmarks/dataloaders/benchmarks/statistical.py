@@ -177,11 +177,11 @@ class StatisticalBenchmark:
         Returns:
             List of BenchmarkResult objects
         """
+        import sys
         results = []
         seeds = self.config.statistical.get_seeds()
-
-        if self.config.verbose:
-            print("Running statistical benchmarks...")
+        print(f"  Running with {len(seeds)} seeds...")
+        sys.stdout.flush()
 
         # These benchmarks internally use multiple seeds
         benchmark_fns = [
@@ -191,14 +191,13 @@ class StatisticalBenchmark:
         ]
 
         for name, fn in benchmark_fns:
-            if self.config.verbose:
-                print(f"\n  {name}...")
-
+            print(f"    {name}...", end=" ", flush=True)
             try:
                 result = fn(self.config, seeds=seeds)
                 results.append(result)
+                print("done")
             except Exception as e:
-                if self.config.verbose:
-                    print(f"    Warning: failed: {e}")
+                print(f"failed: {e}")
+            sys.stdout.flush()
 
         return results

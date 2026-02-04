@@ -40,12 +40,26 @@ def generate_summary_report(results: List[BenchmarkResult]) -> str:
     lines.append("EXECUTIVE SUMMARY")
     lines.append("-" * 40)
 
-    # Best generalization result
-    if gen_results:
+    # Best generalization result (only from actual test accuracy benchmarks)
+    # Exclude comparison benchmarks that use GeneralizationMetrics for other purposes
+    test_accuracy_benchmarks = [
+        "test_accuracy_with_dedup",
+        "overfitting_reduction",
+        "convergence_speed",
+        "sample_efficiency",
+        "cross_validation_variance",
+        "mode_accuracy_comparison",
+        "paraphrase_impact_on_model",
+        "threshold_tuning",
+    ]
+
+    real_gen_results = [r for r in gen_results if r.benchmark_name in test_accuracy_benchmarks]
+
+    if real_gen_results:
         best_gen = None
         best_improvement = -999
 
-        for r in gen_results:
+        for r in real_gen_results:
             if r.generalization.baseline_test_accuracies:
                 improvement = r.generalization.test_accuracy_improvement()
                 if improvement.mean > best_improvement:

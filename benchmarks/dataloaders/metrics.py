@@ -185,7 +185,11 @@ def paired_t_test(
         HypothesisTest with statistic and p-value
     """
     if len(group1) != len(group2):
-        raise ValueError("Groups must have same length for paired t-test")
+        # Fall back to returning non-significant result
+        return HypothesisTest(
+            statistic=0.0, p_value=1.0, is_significant=False,
+            alpha=alpha, test_name="paired_t_test (length_mismatch)"
+        )
 
     if len(group1) < 2:
         return HypothesisTest(

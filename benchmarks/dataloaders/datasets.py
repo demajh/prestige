@@ -169,10 +169,23 @@ PARAPHRASE_PATTERNS = [
 ]
 
 
-def _generate_sentence(label: int, seed: int) -> str:
-    """Generate a sentence for a given label using templates."""
+def _generate_sentence(label: int, seed: int, add_noise: bool = True) -> str:
+    """Generate a sentence for a given label using templates.
+
+    Args:
+        label: Class label
+        seed: Random seed
+        add_noise: If True, sometimes use templates from other classes (label noise)
+    """
     rng = random.Random(seed)
-    templates = SENTENCE_TEMPLATES.get(label, SENTENCE_TEMPLATES[0])
+
+    # With some probability, use a template from a different class (label noise)
+    # This makes classification harder and more realistic
+    effective_label = label
+    if add_noise and rng.random() < 0.15:  # 15% label noise
+        effective_label = rng.randint(0, len(SENTENCE_TEMPLATES) - 1)
+
+    templates = SENTENCE_TEMPLATES.get(effective_label, SENTENCE_TEMPLATES[0])
     template = rng.choice(templates)
 
     # Fill in placeholders
@@ -181,6 +194,11 @@ def _generate_sentence(label: int, seed: int) -> str:
         placeholder = "{" + key + "}"
         if placeholder in result:
             result = result.replace(placeholder, rng.choice(options), 1)
+
+    # Add random filler words to increase overlap between classes
+    if add_noise and rng.random() < 0.3:  # 30% chance
+        fillers = ["Additionally,", "Furthermore,", "However,", "Indeed,", "Moreover,"]
+        result = rng.choice(fillers) + " " + result.lower()
 
     return result
 
@@ -402,10 +420,13 @@ def generate_contaminated_dataset(
     rng = random.Random(seed)
 
     # Generate test set first (all unique)
+    # Add unique suffix to ensure no natural duplicates between train/test
     test_samples: List[SyntheticSample] = []
     for i in range(test_size):
         label = i % num_classes
-        text = _generate_sentence(label, seed=seed + i)
+        base_text = _generate_sentence(label, seed=seed + i, add_noise=False)
+        # Add unique identifier to ensure test texts are distinct from train
+        text = f"{base_text} [ref:{seed}:test:{i}]"
         group_id = _hash_text(text)
 
         test_samples.append(SyntheticSample(
@@ -422,11 +443,13 @@ def generate_contaminated_dataset(
     # Generate training set
     train_samples: List[SyntheticSample] = []
 
-    # First, add clean training samples
+    # First, add clean training samples with unique identifiers
     clean_train_size = train_size - num_contaminated
     for i in range(clean_train_size):
         label = i % num_classes
-        text = _generate_sentence(label, seed=seed + test_size + i)
+        base_text = _generate_sentence(label, seed=seed + test_size + i, add_noise=False)
+        # Add unique identifier to ensure train texts are distinct from test
+        text = f"{base_text} [ref:{seed}:train:{i}]"
         group_id = _hash_text(text)
 
         train_samples.append(SyntheticSample(
