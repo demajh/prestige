@@ -110,7 +110,7 @@ setup(
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
     url="https://github.com/demajh/prestige",
-    packages=["prestige"],
+    packages=["prestige", "prestige.dataloaders"],
     ext_modules=[CMakeExtension("prestige._prestige")],
     cmdclass={"build_ext": CMakeBuild},
     python_requires=">=3.8",
