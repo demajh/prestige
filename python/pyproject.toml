@@ -59,7 +59,7 @@ Documentation = "https://prestige.readthedocs.io"
 Repository = "https://github.com/demajh/prestige"
 
 [tool.setuptools]
-packages = ["prestige"]
+packages = ["prestige", "prestige.dataloaders"]
 package-dir = {"" = "."}
 
 [tool.pytest.ini_options]
