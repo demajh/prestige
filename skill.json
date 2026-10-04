@@ -1,6 +1,6 @@
 {
   "name": "prestige",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unique value store: a key-value store that keeps one physical copy of every unique value (exact SHA-256 or semantic embedding dedup), with TTL, LRU eviction and ML dataset deduplication. Local, RocksDB-backed.",
   "homepage": "https://github.com/demajh/prestige",
   "license": "Apache-2.0",

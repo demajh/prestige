@@ -1,6 +1,6 @@
 ---
 name: prestige
-version: 0.1.0
+version: 0.2.0
 description: A key-value store that keeps one physical copy of every unique value. Deduplicate memories, caches and datasets with Put/Get; exact (SHA-256) or semantic (embedding) matching; TTL and LRU eviction; RocksDB underneath.
 homepage: https://github.com/demajh/prestige
 metadata: {"openclaw":{"category":"storage","install":"pip install prestige-uvs","import":"prestige","language":"python","runtime":"local, no network, no account"}}

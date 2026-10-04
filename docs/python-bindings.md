@@ -679,5 +679,5 @@ pypi.org: add a pending publisher for project `prestige-uvs` with owner `demajh`
 `workflow_dispatch` runs). Then:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```

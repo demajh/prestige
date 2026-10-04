@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(prestige_uvs
-  VERSION 0.1.0
+  VERSION 0.2.0
   DESCRIPTION "Content-deduplicated key-value store with exact and semantic dedup"
   HOMEPAGE_URL "https://github.com/demajh/prestige"
   LANGUAGES CXX
