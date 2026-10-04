@@ -1,3 +1,3 @@
-usr/include/prestige/*.hpp
+usr/include/prestige
 usr/lib/*/cmake/prestige_uvs/*.cmake
 usr/lib/*/pkgconfig/prestige_uvs.pc

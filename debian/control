@@ -2,7 +2,7 @@ Source: prestige
 Section: database
 Priority: optional
 Maintainer: demajh <demajh@users.noreply.github.com>
-Build-Depends: debhelper-compat (= 13), cmake (>= 3.16), librocksdb-dev
+Build-Depends: debhelper-compat (= 13), cmake (>= 3.16), librocksdb-dev, libssl-dev
 Standards-Version: 4.6.0
 Homepage: https://github.com/demajh/prestige
 Rules-Requires-Root: no
