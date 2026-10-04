@@ -6,6 +6,10 @@ name: Python wheels
 #   push of a tag v*        -> build, test, publish to PyPI (trusted publishing; see docs/python-bindings.md)
 #   workflow_dispatch       -> build, test, publish to TestPyPI
 #   pull_request / push     -> build and test only (artifacts kept 7 days)
+#
+# Linux wheels take RocksDB from EPEL inside the manylinux_2_28 image (source build as a fallback). macOS wheels build
+# RocksDB and OpenSSL from source at a fixed deployment target: Homebrew no longer publishes Intel bottles for either
+# library, and its Apple-silicon bottles would pin the wheel to the runner's macOS version. Those builds are cached.
 
 on:
   push:
@@ -13,6 +17,12 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+env:
+  ROCKSDB_VERSION: "9.7.4"
+  OPENSSL_VERSION: "3.5.9"
+  # Minimum macOS for the macOS wheels and for every library bundled into them (cibuildwheel and CMake read this).
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 jobs:
   build_wheels:
@@ -22,23 +32,58 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest     # manylinux_2_28 x86_64
+          - os: ubuntu-latest       # manylinux_2_28 x86_64
             linux_arch: x86_64
-          - os: ubuntu-24.04-arm  # manylinux_2_28 aarch64
+          - os: ubuntu-24.04-arm    # manylinux_2_28 aarch64
             linux_arch: aarch64
-          - os: macos-13          # x86_64
-          - os: macos-14          # arm64
+          - os: macos-15-intel      # macOS x86_64 (GitHub retired the macos-13 runner; this is the current Intel one)
+          - os: macos-15            # macOS arm64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install RocksDB (macOS)
+      - name: Cache RocksDB and OpenSSL (macOS)
         if: runner.os == 'macOS'
-        # The RocksDB bottle's minimum macOS version becomes the wheel's deployment target, so delocate accepts the
-        # bundled libraries. cibuildwheel inherits these variables from the job environment.
+        id: deps
+        uses: actions/cache@v4
+        with:
+          path: ~/deps
+          key: ${{ runner.os }}-${{ runner.arch }}-rocksdb-${{ env.ROCKSDB_VERSION }}-openssl-${{ env.OPENSSL_VERSION }}-target-${{ env.MACOSX_DEPLOYMENT_TARGET }}-v1
+
+      - name: Build RocksDB and OpenSSL (macOS)
+        if: runner.os == 'macOS' && steps.deps.outputs.cache-hit != 'true'
         run: |
-          brew install rocksdb openssl@3
-          echo "MACOSX_DEPLOYMENT_TARGET=$(otool -l "$(brew --prefix rocksdb)/lib/librocksdb.dylib" | awk '/minos/{print $2; exit}')" >> "$GITHUB_ENV"
-          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          set -euo pipefail
+          DEPS="$HOME/deps"
+          mkdir -p "$DEPS/include" "$DEPS/lib"
+          JOBS="$(sysctl -n hw.ncpu)"
+          case "$(uname -m)" in arm64) SSL_TARGET=darwin64-arm64-cc ;; *) SSL_TARGET=darwin64-x86_64-cc ;; esac
+
+          curl -fsSL -o openssl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz"
+          tar xzf openssl.tar.gz
+          ( cd "openssl-$OPENSSL_VERSION" &&
+            ./Configure "$SSL_TARGET" --prefix="$DEPS" --libdir=lib shared no-tests no-docs > /dev/null &&
+            make -j"$JOBS" build_libs > /dev/null &&
+            make install_dev > /dev/null )
+
+          git clone --depth 1 --branch "v$ROCKSDB_VERSION" https://github.com/facebook/rocksdb.git
+          # Only the shared library is built (the static one would double the compile time); install names are absolute
+          # so delocate can find and bundle it. PORTABLE=1 avoids -march=native in a redistributable wheel.
+          cmake -S rocksdb -B rocksdb/build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$DEPS" -DCMAKE_INSTALL_NAME_DIR="$DEPS/lib" -DCMAKE_BUILD_WITH_INSTALL_NAME_DIR=ON \
+            -DROCKSDB_BUILD_SHARED=ON -DPORTABLE=1 -DUSE_RTTI=1 -DFAIL_ON_WARNINGS=OFF \
+            -DWITH_GFLAGS=OFF -DWITH_TESTS=OFF -DWITH_BENCHMARK_TOOLS=OFF -DWITH_TOOLS=OFF -DWITH_CORE_TOOLS=OFF \
+            -DWITH_ZLIB=ON -DWITH_BZ2=ON
+          cmake --build rocksdb/build -j"$JOBS" --target rocksdb-shared
+          cp -R rocksdb/include/rocksdb "$DEPS/include/"
+          cp -R rocksdb/build/librocksdb*.dylib "$DEPS/lib/"
+          otool -L "$DEPS/lib/librocksdb.dylib" | head -4
+          otool -L "$DEPS/lib/libcrypto.dylib" | head -3
+
+      - name: Point the build at the macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          echo "OPENSSL_ROOT_DIR=$HOME/deps" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$HOME/deps" >> "$GITHUB_ENV"
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21.3
@@ -56,9 +101,11 @@ jobs:
           CIBW_BEFORE_ALL_LINUX: >
             (dnf install -y epel-release && dnf install -y rocksdb-devel openssl-devel) ||
             (dnf install -y openssl-devel snappy-devel lz4-devel libzstd-devel zlib-devel bzip2-devel gflags-devel &&
-             git clone --depth 1 --branch v9.7.4 https://github.com/facebook/rocksdb.git /tmp/rocksdb &&
+             git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb &&
              cmake -S /tmp/rocksdb -B /tmp/rocksdb/build -DCMAKE_BUILD_TYPE=Release -DROCKSDB_BUILD_SHARED=ON
-               -DWITH_GFLAGS=OFF -DWITH_TESTS=OFF -DWITH_BENCHMARK_TOOLS=OFF -DWITH_TOOLS=OFF -DWITH_SNAPPY=ON -DWITH_LZ4=ON -DWITH_ZSTD=ON -DWITH_ZLIB=ON -DWITH_BZ2=ON &&
+               -DPORTABLE=1 -DUSE_RTTI=1 -DFAIL_ON_WARNINGS=OFF
+               -DWITH_GFLAGS=OFF -DWITH_TESTS=OFF -DWITH_BENCHMARK_TOOLS=OFF -DWITH_TOOLS=OFF -DWITH_CORE_TOOLS=OFF
+               -DWITH_SNAPPY=ON -DWITH_LZ4=ON -DWITH_ZSTD=ON -DWITH_ZLIB=ON -DWITH_BZ2=ON &&
              cmake --build /tmp/rocksdb/build -j"$(nproc)" && cmake --install /tmp/rocksdb/build)
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest -q --import-mode=importlib {project}/python/tests/test_store.py
