@@ -22,9 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest   # manylinux_2_28 x86_64
-          - os: macos-13        # x86_64
-          - os: macos-14        # arm64
+          - os: ubuntu-latest     # manylinux_2_28 x86_64
+            linux_arch: x86_64
+          - os: ubuntu-24.04-arm  # manylinux_2_28 aarch64
+            linux_arch: aarch64
+          - os: macos-13          # x86_64
+          - os: macos-14          # arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -41,9 +44,10 @@ jobs:
           CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
           CIBW_SKIP: "*-musllinux_* *-win32 *_i686"
           CIBW_ARCHS_MACOS: native
-          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ARCHS_LINUX: ${{ matrix.linux_arch }}
           # manylinux_2_28 (AlmaLinux 8) has RocksDB in EPEL; build it from source if the package is unavailable.
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: >
             (dnf install -y epel-release && dnf install -y rocksdb-devel openssl-devel) ||
             (dnf install -y openssl-devel snappy-devel lz4-devel libzstd-devel zlib-devel bzip2-devel gflags-devel &&

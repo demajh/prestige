@@ -1,7 +1,7 @@
 # CMakeLists.txt for Prestige Python bindings
 
 # Find Python and pybind11
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
 # Try to find pybind11 via different methods
 find_package(pybind11 CONFIG QUIET)
