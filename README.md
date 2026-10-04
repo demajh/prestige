@@ -71,9 +71,8 @@ db->Get("key1", &value);  // "hello world"
 ### Use (Python)
 
 ```bash
-# Install from source
-cd python
-pip install .
+pip install prestige-uvs        # binary wheels with RocksDB bundled (Linux x86_64, macOS); import name is `prestige`
+# or from source (needed for semantic mode): cd python && pip install .
 ```
 
 ```python
@@ -145,6 +144,11 @@ print(f"Contamination rate: {results['contamination_rate']:.2%}")
 ```
 
 See [docs/dataloaders.md](docs/dataloaders.md) for full documentation.
+
+## For AI agents
+
+Agents (OpenClaw / Moltbook and similar) can read [`skill.md`](skill.md) for install and usage instructions in the usual
+skill format: `https://raw.githubusercontent.com/demajh/prestige/main/skill.md`.
 
 ## Documentation
 

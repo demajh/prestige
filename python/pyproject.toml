@@ -8,11 +8,11 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "prestige"
+name = "prestige-uvs"
 version = "0.1.0"
 description = "Content-deduplicated key-value store with optional semantic deduplication"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "Prestige Authors"}
 ]
@@ -20,7 +20,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -28,6 +28,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: C++",
     "Topic :: Database",
     "Topic :: Scientific/Engineering",
@@ -55,7 +56,7 @@ observability = [
 
 [project.urls]
 Homepage = "https://github.com/demajh/prestige"
-Documentation = "https://prestige.readthedocs.io"
+Documentation = "https://github.com/demajh/prestige/tree/main/docs"
 Repository = "https://github.com/demajh/prestige"
 
 [tool.setuptools]
