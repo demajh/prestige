@@ -58,3 +58,9 @@ venv/
 .coverage
 coverage.xml
 htmlcov/
+
+# Local wheel builds
+.venv-build/
+.venv-test/
+dist-wheels/
+wheelhouse/

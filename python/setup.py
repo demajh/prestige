@@ -36,7 +36,12 @@ class CMakeBuild(build_ext):
         # CMake configuration
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={ext_dir}",
+            # The interpreter running this build must be the one CMake/pybind11 compile against (FindPython3 ignores
+            # PYTHON_EXECUTABLE and would otherwise pick whatever `python3` is first on PATH).
+            f"-DPython3_EXECUTABLE={sys.executable}",
+            f"-DPython_EXECUTABLE={sys.executable}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
+            "-DPython3_FIND_STRATEGY=LOCATION",
             f"-DCMAKE_BUILD_TYPE={'Debug' if self.debug else 'Release'}",
             "-DPRESTIGE_BUILD_PYTHON=ON",
             "-DPRESTIGE_BUILD_TESTS=OFF",
@@ -73,8 +78,9 @@ class CMakeBuild(build_ext):
             if archs:
                 cmake_args.append(f"-DCMAKE_OSX_ARCHITECTURES={archs}")
 
-            # Set deployment target
-            cmake_args.append("-DCMAKE_OSX_DEPLOYMENT_TARGET=10.14")
+            # Deployment target: follow MACOSX_DEPLOYMENT_TARGET when the packaging tool sets it (cibuildwheel, delocate),
+            # otherwise the oldest version that supports both architectures.
+            cmake_args.append(f"-DCMAKE_OSX_DEPLOYMENT_TARGET={os.environ.get('MACOSX_DEPLOYMENT_TARGET', '11.0')}")
 
         # Configure
         print(f"CMake configure: {' '.join(cmake_args)}")
@@ -103,7 +109,7 @@ def get_long_description():
 
 
 setup(
-    name="prestige",
+    name="prestige-uvs",
     version=__version__,
     author="Prestige Authors",
     description="Content-deduplicated key-value store with optional semantic deduplication",
@@ -123,7 +129,7 @@ setup(
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Intended Audience :: Science/Research",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",

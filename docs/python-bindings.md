@@ -4,6 +4,17 @@ Prestige provides Python bindings that expose the full functionality of the C++ 
 
 ## Installation
 
+### From PyPI
+
+```bash
+pip install prestige-uvs
+```
+
+Binary wheels bundle RocksDB for Linux x86_64 (manylinux_2_28) and macOS (Intel and Apple silicon), Python 3.9 to 3.13.
+The distribution is called `prestige-uvs` because the name `prestige` on PyPI belongs to an unrelated project; the import
+name is `prestige`. Wheels are built without semantic mode (`prestige.SEMANTIC_AVAILABLE` is `False`); build from source
+with ONNX Runtime for that.
+
 ### From Source
 
 ```bash
@@ -658,3 +669,15 @@ If you encounter build errors:
 - [API Reference](api-reference.md): Complete C++ API
 - [Cache Semantics](cache-semantics.md): TTL and eviction details
 - [Semantic Dedup](semantic-dedup.md): Embedding-based deduplication
+
+## Releasing wheels
+
+`.github/workflows/python-wheels.yml` builds wheels with cibuildwheel on every push and pull request, and publishes
+them to PyPI on a `v*` tag through [trusted publishing](https://docs.pypi.org/trusted-publishers/). One-time setup on
+pypi.org: add a pending publisher for project `prestige-uvs` with owner `demajh`, repository `prestige`, workflow
+`python-wheels.yml`, environment `pypi` (and the same on test.pypi.org with environment `testpypi` for
+`workflow_dispatch` runs). Then:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
