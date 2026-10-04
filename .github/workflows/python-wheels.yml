@@ -33,7 +33,12 @@ jobs:
 
       - name: Install RocksDB (macOS)
         if: runner.os == 'macOS'
-        run: brew install rocksdb openssl@3
+        # The RocksDB bottle's minimum macOS version becomes the wheel's deployment target, so delocate accepts the
+        # bundled libraries. cibuildwheel inherits these variables from the job environment.
+        run: |
+          brew install rocksdb openssl@3
+          echo "MACOSX_DEPLOYMENT_TARGET=$(otool -l "$(brew --prefix rocksdb)/lib/librocksdb.dylib" | awk '/minos/{print $2; exit}')" >> "$GITHUB_ENV"
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21.3
@@ -55,10 +60,6 @@ jobs:
              cmake -S /tmp/rocksdb -B /tmp/rocksdb/build -DCMAKE_BUILD_TYPE=Release -DROCKSDB_BUILD_SHARED=ON
                -DWITH_GFLAGS=OFF -DWITH_TESTS=OFF -DWITH_BENCHMARK_TOOLS=OFF -DWITH_TOOLS=OFF -DWITH_SNAPPY=ON -DWITH_LZ4=ON -DWITH_ZSTD=ON -DWITH_ZLIB=ON -DWITH_BZ2=ON &&
              cmake --build /tmp/rocksdb/build -j"$(nproc)" && cmake --install /tmp/rocksdb/build)
-          # The macOS runner's RocksDB bottle sets the minimum macOS version; the wheel tag must match for delocate.
-          CIBW_ENVIRONMENT_MACOS: >
-            MACOSX_DEPLOYMENT_TARGET=$(otool -l $(brew --prefix rocksdb)/lib/librocksdb.dylib | awk '/minos/{print $2; exit}')
-            OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest -q --import-mode=importlib {project}/python/tests/test_store.py
 
