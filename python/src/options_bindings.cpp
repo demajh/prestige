@@ -90,6 +90,8 @@ void BindOptions(py::module_& m) {
                      "Maximum retry delay (default: 100000)")
       .def_readwrite("retry_jitter_factor", &Options::retry_jitter_factor,
                      "Retry jitter factor 0-1 (default: 0.5)")
+      .def_readwrite("decision_sweep_cursor_interval", &Options::decision_sweep_cursor_interval,
+                     "Records a decision sweep examines between cursor checkpoints; 0 = only at the end (default: 256)")
 
       // GC and cache
       .def_readwrite("enable_gc", &Options::enable_gc,

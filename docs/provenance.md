@@ -36,6 +36,9 @@ back to that key, the policy revision, and the parent decision.
   have since arrived leave the queue and count as `repairs`), then continues a full walk of all records in
   write order from where the previous sweep stopped, queueing anything dangling that nobody has read yet.
   Walking in write order means a body committed after its reference in a fast burst is found before it ages out.
+  The cursor is persisted as the walk goes: atomically with every record it queues, and every
+  `decision_sweep_cursor_interval` records otherwise (default 256), so a sweep interrupted by a crash resumes from
+  its last checkpoint rather than re-examining what it had already verified.
 - **Integrity debt** is the queue size after a sweep. If it grows faster than sweeps drain it, that delta is the
   number to alert on. It is reported by `GetHealth` (`decision_queue_size`), by the sweep result, and as the
   gauge `prestige.decision.queue_size`.
@@ -106,6 +109,7 @@ Decision records are exact-mode only for now. Deleting a key never deletes a rec
 | `prestige.decision.get_total` | counter | `GetDecision` calls |
 | `prestige.decision.dangling_read_total` | counter | Reads that found a missing body |
 | `prestige.decision.sweep_checked_total` | counter | Records verified by sweeps |
+| `prestige.decision.sweep_checkpoint_total` | counter | Times a sweep persisted its cursor (with a queued record, every interval, at the end) |
 | `prestige.decision.repaired_total` | counter | Queued records that resolved during a sweep |
 | `prestige.decision.queue_size` | gauge | Integrity debt after the last sweep |
 
@@ -114,4 +118,5 @@ Decision records are exact-mode only for now. Deleting a key never deletes a rec
 The field set (decision id, policy revision, input hashes, parent decision), the rule that anything whose absence
 cannot be detected must live inside the same write, and the severity-sequenced repair (read-time guard first,
 write-order sweep as the drain, queue growth as the integrity-debt metric) follow a public design exchange with
-**c3po-clawd** on Moltbook in October 2026, who agreed to be credited by name.
+**c3po-clawd** on Moltbook in October 2026, who agreed to be credited by name. Their review of the implementation
+added the rule that the sweep persists its cursor with each repair batch rather than once at the end of the call.

@@ -6,8 +6,12 @@
 #include <prestige/store.hpp>
 
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace prestige {
@@ -52,6 +56,27 @@ class DecisionTest : public ::testing::Test {
   std::filesystem::path test_dir_;
   std::string db_path_;
   std::unique_ptr<Store> store_;
+};
+
+// Counts the sweep's cursor checkpoints. The optional callback runs on each one; a test uses it to stand in
+// for a crash.
+class CheckpointSink : public MetricsSink {
+ public:
+  explicit CheckpointSink(std::function<void(uint64_t)> on_checkpoint = {})
+      : on_checkpoint_(std::move(on_checkpoint)) {}
+
+  void Counter(std::string_view name, uint64_t delta) override {
+    if (name != "prestige.decision.sweep_checkpoint_total") return;
+    checkpoints_ += delta;
+    if (on_checkpoint_) on_checkpoint_(checkpoints_);
+  }
+  void Histogram(std::string_view, uint64_t) override {}
+
+  uint64_t checkpoints() const { return checkpoints_; }
+
+ private:
+  std::function<void(uint64_t)> on_checkpoint_;
+  uint64_t checkpoints_ = 0;
 };
 
 TEST_F(DecisionTest, RecordCommitsWithTheWriteAndResolves) {
@@ -246,6 +271,66 @@ TEST_F(DecisionTest, SweepWalksUnreadRecordsInWriteOrderAndListsThem) {
   EXPECT_EQ(st.queue_size, 1u);
   EXPECT_EQ(st.cursor_sequence, 3u);
   EXPECT_EQ(Health().decision_dangling_reads, 0u);  // sweep finds are not read-time misses
+}
+
+TEST_F(DecisionTest, SweepPersistsItsCursorWithQueuedRecordsAndEveryInterval) {
+  auto sink = std::make_shared<CheckpointSink>();
+  Options opt;
+  opt.metrics = sink;
+  opt.decision_sweep_cursor_interval = 4;
+  ASSERT_TRUE(OpenStore(opt).ok());
+  std::string missing_digest;
+  ASSERT_TRUE(store_->Digest("never written", &missing_digest).ok());
+  for (int i = 1; i <= 10; ++i) {
+    Decision d = MakeDecision("dec-" + std::to_string(i));
+    if (i == 2 || i == 9) d.input_digests = {missing_digest};
+    ASSERT_TRUE(store_->PutWithDecision("k" + std::to_string(i), "v" + std::to_string(i), d).ok());
+  }
+
+  // Checkpoints: with dec-2 as it is queued, four records later (cursor 6), with dec-9, and at the end.
+  DecisionSweepStats st;
+  ASSERT_TRUE(store_->SweepDecisions(0, &st).ok());
+  EXPECT_EQ(st.checked, 10u);
+  EXPECT_EQ(st.dangling, 2u);
+  EXPECT_EQ(st.queue_size, 2u);
+  EXPECT_EQ(st.cursor_sequence, 10u);
+  EXPECT_EQ(sink->checkpoints(), 4u);
+
+  // Nothing new to walk: the queue is re-checked and the cursor is not rewritten.
+  ASSERT_TRUE(store_->SweepDecisions(0, &st).ok());
+  EXPECT_EQ(st.checked, 2u);
+  EXPECT_EQ(st.dangling, 2u);
+  EXPECT_EQ(st.cursor_sequence, 10u);
+  EXPECT_EQ(sink->checkpoints(), 4u);
+}
+
+TEST_F(DecisionTest, SweepInterruptedAfterACheckpointResumesFromIt) {
+  // A sink that throws at the second checkpoint stands in for a crash: the call never reaches its end-of-call
+  // cursor write, and whatever it had persisted by then is where the next sweep starts.
+  auto sink = std::make_shared<CheckpointSink>([](uint64_t n) {
+    if (n == 2) throw std::runtime_error("crash after the second checkpoint");
+  });
+  Options opt;
+  opt.metrics = sink;
+  opt.decision_sweep_cursor_interval = 3;
+  ASSERT_TRUE(OpenStore(opt).ok());
+  for (int i = 1; i <= 10; ++i) {
+    const std::string n = std::to_string(i);
+    ASSERT_TRUE(store_->PutWithDecision("k" + n, "v" + n, MakeDecision("dec-" + n)).ok());
+  }
+
+  DecisionSweepStats st;
+  EXPECT_THROW(store_->SweepDecisions(0, &st), std::runtime_error);  // checkpoints after 3 and 6, then "crash"
+
+  // Restart. The walk resumes after record 6 instead of starting over.
+  store_.reset();
+  Options plain;
+  plain.decision_sweep_cursor_interval = 3;
+  ASSERT_TRUE(OpenStore(plain).ok());
+  ASSERT_TRUE(store_->SweepDecisions(0, &st).ok());
+  EXPECT_EQ(st.checked, 4u);
+  EXPECT_EQ(st.cursor_sequence, 10u);
+  EXPECT_EQ(st.max_sequence, 10u);
 }
 
 TEST_F(DecisionTest, RecordsSurviveReopenAndSequencesContinue) {

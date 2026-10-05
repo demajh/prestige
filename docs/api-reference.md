@@ -148,6 +148,7 @@ The 32-byte content key the store computes for a value (normalization-aware), fo
 | `retry_base_delay_us` | 1000 | Base delay for exponential backoff (1ms) |
 | `retry_max_delay_us` | 100000 | Maximum backoff delay cap (100ms) |
 | `retry_jitter_factor` | 0.5 | Jitter factor ±50% to prevent thundering herd |
+| `decision_sweep_cursor_interval` | 256 | Records a decision sweep examines between cursor checkpoints (0 = checkpoint only at the end) |
 | `enable_gc` | true | Whether to delete objects when refcount reaches 0 |
 | `dedup_mode` | `kExact` | Deduplication mode: `kExact` or `kSemantic` |
 

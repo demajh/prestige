@@ -132,6 +132,12 @@ struct Options {
   // GC behavior
   bool enable_gc = true;
 
+  // Decision records (provenance): how often SweepDecisions persists its write-order cursor while it walks
+  // healthy records, as a number of records examined (0 = only at the end of the call). The cursor is always
+  // persisted atomically with every record the walk queues for repair, so a sweep interrupted by a crash
+  // resumes from its last checkpoint instead of re-examining what it had already verified.
+  uint64_t decision_sweep_cursor_interval = 256;
+
   // ---------------------------------------------------------------------------
   // Cache behavior settings (TTL and LRU eviction)
   // ---------------------------------------------------------------------------

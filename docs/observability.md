@@ -72,7 +72,8 @@ Call `EmitCacheMetrics()` periodically (e.g., every few seconds) to emit:
 
 ### Decision Records
 - **Counters**: `prestige.decision.recorded_total`, `prestige.decision.replayed_total`, `prestige.decision.get_total`,
-  `prestige.decision.dangling_read_total`, `prestige.decision.sweep_checked_total`, `prestige.decision.repaired_total`,
+  `prestige.decision.dangling_read_total`, `prestige.decision.sweep_checked_total`, `prestige.decision.sweep_checkpoint_total`,
+  `prestige.decision.repaired_total`,
   `prestige.decision.bookkeeping_error_total`
 - **Gauge**: `prestige.decision.queue_size` (integrity debt after the last sweep)
 - **Put span attributes**: `decision`, `decision_replayed`; event `retry.decision_lock`

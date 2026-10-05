@@ -1421,18 +1421,39 @@ rocksdb::Status Store::SweepDecisions(uint64_t max_records, DecisionSweepStats* 
   }
 
   // 2) Continue the full walk from the cursor, in write order, with the remaining budget.
+  //    The cursor is persisted as the walk goes, not only at the end: atomically with every record the walk
+  //    queues for repair, and every decision_sweep_cursor_interval records otherwise. A sweep interrupted by a
+  //    crash therefore resumes from its last checkpoint instead of re-examining what it had already verified.
   uint64_t cursor = 0;
   {
     std::string raw;
     if (db_->Get(ro, decisions_cf_, rocksdb::Slice(DecCursorKey()), &raw).ok()) DecodeU64BE(raw, &cursor);
   }
+  uint64_t persisted_cursor = cursor;  // what is on disk
+  uint64_t since_checkpoint = 0;       // records examined since the cursor was last persisted
+  auto persist_cursor = [&]() -> rocksdb::Status {
+    if (cursor == persisted_cursor) return rocksdb::Status::OK();
+    rocksdb::Status s = db_->Put(wo, decisions_cf_, rocksdb::Slice(DecCursorKey()), rocksdb::Slice(EncodeU64BE(cursor)));
+    if (s.ok()) {
+      persisted_cursor = cursor;
+      since_checkpoint = 0;
+      EmitCounter(opt_, "prestige.decision.sweep_checkpoint_total", 1);
+    }
+    return s;
+  };
   {
     std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, decisions_cf_));
     for (it->Seek(rocksdb::Slice(DecSeqKey(cursor + 1)));
          it->Valid() && it->key().size() == 9 && it->key()[0] == kDecSeq && stats->checked < max_records; it->Next()) {
+      // Periodic checkpoint: everything before this record has been examined.
+      if (opt_.decision_sweep_cursor_interval > 0 && since_checkpoint >= opt_.decision_sweep_cursor_interval) {
+        rocksdb::Status s = persist_cursor();
+        if (!s.ok()) return s;
+      }
       uint64_t seq = 0;
       DecodeU64BE(std::string_view(it->key().data() + 1, 8), &seq);
       cursor = seq;
+      since_checkpoint++;
       if (handled.count(seq)) continue;  // verified in the queue phase of this call
       const std::string id = it->value().ToString();
       stats->checked++;
@@ -1449,13 +1470,20 @@ rocksdb::Status Store::SweepDecisions(uint64_t max_records, DecisionSweepStats* 
       if (db_->Get(ro, decisions_cf_, rocksdb::Slice(DecQueueKey(seq)), &existing).ok()) continue;  // already queued
       std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
       if (!txn) continue;
+      // Queue the record and move the cursor past it in the same transaction, so a crash can leave neither the
+      // record queued with the cursor still before it, nor the cursor past a record that never reached the queue.
       rocksdb::Status s = txn->Put(decisions_cf_, rocksdb::Slice(DecQueueKey(seq)), rocksdb::Slice(id));
+      if (s.ok()) s = txn->Put(decisions_cf_, rocksdb::Slice(DecCursorKey()), rocksdb::Slice(EncodeU64BE(seq)));
       if (s.ok()) s = txn->Commit();
-      (void)s;
+      if (s.ok()) {
+        persisted_cursor = seq;
+        since_checkpoint = 0;
+        EmitCounter(opt_, "prestige.decision.sweep_checkpoint_total", 1);
+      }
     }
   }
   {
-    rocksdb::Status s = db_->Put(wo, decisions_cf_, rocksdb::Slice(DecCursorKey()), rocksdb::Slice(EncodeU64BE(cursor)));
+    rocksdb::Status s = persist_cursor();  // end of the call, or of its budget
     if (!s.ok()) return s;
   }
 
