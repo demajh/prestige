@@ -150,9 +150,12 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        # Coverage upload is best effort: an uploader or network failure must never fail the build.
+        uses: codecov/codecov-action@v5
+        continue-on-error: true
         with:
           files: build/coverage.info.cleaned
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
   # =============================================================================
@@ -361,10 +364,12 @@ jobs:
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
+        continue-on-error: true
         with:
           files: python/coverage.xml
           flags: python
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
   # =============================================================================

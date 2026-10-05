@@ -90,6 +90,8 @@ void BindOptions(py::module_& m) {
                      "Maximum retry delay (default: 100000)")
       .def_readwrite("retry_jitter_factor", &Options::retry_jitter_factor,
                      "Retry jitter factor 0-1 (default: 0.5)")
+      .def_readwrite("decision_sweep_cursor_interval", &Options::decision_sweep_cursor_interval,
+                     "Records a decision sweep examines between cursor checkpoints; 0 = only at the end (default: 256)")
 
       // GC and cache
       .def_readwrite("enable_gc", &Options::enable_gc,
@@ -261,6 +263,14 @@ void BindOptions(py::module_& m) {
                     "Number of orphaned objects (refcount=0)")
       .def_readonly("oldest_object_age_s", &HealthStats::oldest_object_age_s,
                     "Age of oldest object in seconds")
+      .def_readonly("decisions_total", &HealthStats::decisions_total,
+                    "Decision records stored")
+      .def_readonly("decision_queue_size", &HealthStats::decision_queue_size,
+                    "Decision records awaiting repair (integrity debt)")
+      .def_readonly("decision_dangling_reads", &HealthStats::decision_dangling_reads,
+                    "Read-time misses on decision records over the store's lifetime")
+      .def_readonly("decision_repairs", &HealthStats::decision_repairs,
+                    "Queued decision records whose bodies later arrived")
       .def_readonly("newest_access_age_s", &HealthStats::newest_access_age_s,
                     "Time since most recent access in seconds")
       .def_readonly("dedup_ratio", &HealthStats::dedup_ratio,

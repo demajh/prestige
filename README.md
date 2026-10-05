@@ -30,6 +30,7 @@ The prestige unique value store is a less gruesome, but no less effective way to
 - **Text normalization** - optional case/whitespace normalization for stable dedup keys
 - **Cache semantics** - TTL expiration, LRU eviction, health monitoring
 - **Atomic operations** - RocksDB TransactionDB ensures consistency
+- **Decision records** - commit the decision id, policy revision and input digests behind a write in the same transaction as the value; detect and repair dangling provenance ([docs](docs/provenance.md))
 - **Observability** - pluggable metrics and distributed tracing hooks
 - **Simple API** - familiar `Put`/`Get`/`Delete` interface
 - **HTTP Server** - REST API for standalone deployment with Prometheus metrics
@@ -161,6 +162,7 @@ skill format: `https://raw.githubusercontent.com/demajh/prestige/main/skill.md`.
 | [Python Bindings](docs/python-bindings.md) | Python API reference and examples |
 | [ML Dataloaders](docs/dataloaders.md) | Deduplicated dataloaders for training |
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
+| [Decision Records](docs/provenance.md) | Provenance committed with the write; read-time guard, repair queue, integrity debt |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |
 | [Observability](docs/observability.md) | Metrics and tracing |

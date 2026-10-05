@@ -92,6 +92,47 @@ void EmitCacheMetrics();
 ```
 Emit current cache statistics to the metrics sink. Call periodically for observability.
 
+### Decision Record Methods
+
+See [Decision records](provenance.md) for the design.
+
+```cpp
+rocksdb::Status PutWithDecision(std::string_view user_key, std::string_view value_bytes,
+                                const Decision& decision);
+```
+Put `user_key -> value_bytes` and commit `decision` in the same transaction. Replaying the same decision for the
+same write returns OK without writing; reusing a `decision_id` for a different write returns `InvalidArgument`.
+Exact mode only.
+
+```cpp
+rocksdb::Status GetDecision(std::string_view decision_id, DecisionRecord* out,
+                            DecisionCheck* check = nullptr) const;
+```
+Read a record and resolve its commitments. A missing body is reported through `check`, counted, and queued for
+a priority sweep. Returns `NotFound` for unknown ids.
+
+```cpp
+rocksdb::Status VerifyDecision(std::string_view decision_id, DecisionRecord* out = nullptr) const;
+```
+Same as `GetDecision`, but returns `Corruption` when any referenced body is missing.
+
+```cpp
+rocksdb::Status ListDecisions(std::vector<DecisionRecord>* out, uint64_t limit = 0,
+                              uint64_t after_sequence = 0) const;
+```
+Records in write order, starting after `after_sequence`.
+
+```cpp
+rocksdb::Status SweepDecisions(uint64_t max_records, DecisionSweepStats* stats);
+```
+Re-check queued records (resolved ones leave the queue as repairs), then continue the write-order walk from the
+last cursor. `stats->queue_size` after the call is the integrity debt. `max_records = 0` means unbounded.
+
+```cpp
+rocksdb::Status Digest(std::string_view value_bytes, std::string* digest_out) const;
+```
+The 32-byte content key the store computes for a value (normalization-aware), for `Decision::input_digests`.
+
 ---
 
 ## Options
@@ -107,6 +148,7 @@ Emit current cache statistics to the metrics sink. Call periodically for observa
 | `retry_base_delay_us` | 1000 | Base delay for exponential backoff (1ms) |
 | `retry_max_delay_us` | 100000 | Maximum backoff delay cap (100ms) |
 | `retry_jitter_factor` | 0.5 | Jitter factor ±50% to prevent thundering herd |
+| `decision_sweep_cursor_interval` | 256 | Records a decision sweep examines between cursor checkpoints (0 = checkpoint only at the end) |
 | `enable_gc` | true | Whether to delete objects when refcount reaches 0 |
 | `dedup_mode` | `kExact` | Deduplication mode: `kExact` or `kSemantic` |
 
@@ -219,6 +261,43 @@ struct HealthStats {
   uint64_t oldest_object_age_s; // Age of oldest object in seconds
   uint64_t newest_access_age_s; // Time since most recent access
   double dedup_ratio;           // Ratio of keys to objects (higher = more dedup)
+  uint64_t decisions_total;          // Decision records stored
+  uint64_t decision_queue_size;      // Records awaiting repair: the integrity debt
+  uint64_t decision_dangling_reads;  // Read-time misses over the store's lifetime
+  uint64_t decision_repairs;         // Queued records whose bodies later arrived
+};
+```
+
+### Decision, DecisionRecord, DecisionCheck, DecisionSweepStats
+
+```cpp
+struct Decision {
+  std::string decision_id;                 // required, unique within the store
+  std::string policy_revision;             // required
+  std::string parent_decision_id;          // optional
+  std::vector<std::string> input_digests;  // optional, 32-byte SHA-256 content keys
+  std::string note;                        // optional
+};
+
+struct DecisionRecord {
+  Decision decision;
+  uint64_t sequence;          // write order
+  uint64_t committed_at_us;
+  std::string user_key;       // the key written
+  std::string output_digest;  // content key of the value written
+};
+
+struct DecisionCheck {
+  bool resolved;                             // every referenced digest has a body
+  std::vector<std::string> missing_digests;  // dangling pointers
+  bool queued_for_repair;                    // this read queued the record
+};
+
+struct DecisionSweepStats {
+  uint64_t checked, dangling, repaired;
+  uint64_t queue_size;       // integrity debt after the sweep
+  uint64_t cursor_sequence;  // last sequence the full walk verified
+  uint64_t max_sequence;
 };
 ```
 

@@ -24,6 +24,7 @@ from ._prestige import (
     Store,
     Options,
     HealthStats,
+    Decision,
     # Enums
     DedupMode,
     NormalizationMode,
@@ -92,6 +93,7 @@ __all__ = [
     "open",
     # Core classes
     "Store",
+    "Decision",
     "Options",
     "HealthStats",
     # Enums

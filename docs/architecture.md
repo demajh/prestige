@@ -33,6 +33,7 @@ Uses neural network embeddings for semantic similarity deduplication:
 | `prestige_dedup_index` | Dedup lookup | `sha256(value_bytes)` (32 bytes) | `object_id` (16 bytes) |
 | `prestige_refcount` | Reference counting for GC | `object_id` | `uint64_le` |
 | `prestige_object_meta` | Reverse mapping for GC | `object_id` | `sha256(value_bytes)` |
+| `prestige_decisions` | Decision records, write-order index, repair queue, counters ([details](provenance.md)) | one-byte prefix + id or `u64be(sequence)` | serialized record, decision id, or counter |
 
 ### Semantic mode (adds/replaces)
 

@@ -132,6 +132,12 @@ struct Options {
   // GC behavior
   bool enable_gc = true;
 
+  // Decision records (provenance): how often SweepDecisions persists its write-order cursor while it walks
+  // healthy records, as a number of records examined (0 = only at the end of the call). The cursor is always
+  // persisted atomically with every record the walk queues for repair, so a sweep interrupted by a crash
+  // resumes from its last checkpoint instead of re-examining what it had already verified.
+  uint64_t decision_sweep_cursor_interval = 256;
+
   // ---------------------------------------------------------------------------
   // Cache behavior settings (TTL and LRU eviction)
   // ---------------------------------------------------------------------------
@@ -389,6 +395,53 @@ struct HealthStats {
   uint64_t oldest_object_age_s = 0; // Age of oldest object in seconds
   uint64_t newest_access_age_s = 0; // Time since most recent access in seconds
   double dedup_ratio = 0.0;         // Ratio of keys to objects (higher = more dedup)
+
+  // Decision records (docs/provenance.md)
+  uint64_t decisions_total = 0;          // Decision records stored
+  uint64_t decision_queue_size = 0;      // Records awaiting repair: the integrity debt
+  uint64_t decision_dangling_reads = 0;  // Read-time misses detected over the store's lifetime
+  uint64_t decision_repairs = 0;         // Queued records whose bodies later arrived
+};
+
+/**
+ * A decision record ties one write to the reason it happened.
+ *
+ * It is committed in the same RocksDB transaction as the Put it describes, so a reader can never find a value
+ * without the record that explains it, nor a record whose content commitment never happened. The record holds
+ * commitments (SHA-256 digests), not bodies: the written value's digest is always resolvable at commit time, and
+ * input bodies may arrive later or be evicted. A reference whose body is missing is detectable, which is the whole
+ * point; see Store::GetDecision and Store::SweepDecisions.
+ */
+struct Decision {
+  std::string decision_id;                 // Required. Caller-chosen, unique within the store.
+  std::string policy_revision;             // Required. Identifier or hash of the policy in force when the decision ran.
+  std::string parent_decision_id;          // Optional. The decision this one follows.
+  std::vector<std::string> input_digests;  // Optional. 32-byte SHA-256 digests of values the decision consumed (Store::Digest).
+  std::string note;                        // Optional. Short free text.
+};
+
+struct DecisionRecord {
+  Decision decision;
+  uint64_t sequence = 0;         // Allocation order of decision writes; SweepDecisions walks in this order.
+  uint64_t committed_at_us = 0;  // Wall clock when the record was written.
+  std::string user_key;          // The key that was written.
+  std::string output_digest;     // Content key (dedup digest) of the value that was written.
+};
+
+/** Result of resolving a decision record's commitments against the bodies in the store. */
+struct DecisionCheck {
+  bool resolved = true;                      // Every referenced digest has a body in the store.
+  std::vector<std::string> missing_digests;  // Digests with no body: dangling pointers.
+  bool queued_for_repair = false;            // This read put the record on the repair queue.
+};
+
+struct DecisionSweepStats {
+  uint64_t checked = 0;          // Records verified in this call.
+  uint64_t dangling = 0;         // Records found with at least one missing body.
+  uint64_t repaired = 0;         // Queued records whose bodies have since arrived (removed from the queue).
+  uint64_t queue_size = 0;       // Records still waiting for repair after this call: the integrity debt.
+  uint64_t cursor_sequence = 0;  // Last sequence the full walk has verified.
+  uint64_t max_sequence = 0;     // Highest sequence allocated so far.
 };
 
 /**
@@ -533,6 +586,46 @@ class Store {
    */
   rocksdb::Status GetHealth(HealthStats* stats) const;
 
+  // ---------------------------------------------------------------------------
+  // Decision records (provenance). See docs/provenance.md.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Put user_key -> value_bytes and record `decision` in the same transaction.
+   * Replaying a decision (same id, same key, same content) is a no-op that returns OK; reusing an id for a
+   * different write returns InvalidArgument. Exact mode only.
+   */
+  rocksdb::Status PutWithDecision(std::string_view user_key,
+                                  std::string_view value_bytes,
+                                  const Decision& decision);
+
+  /**
+   * Read a decision record and resolve its commitments. This is the read-time guard: when a referenced body is
+   * missing, the record is queued for a priority sweep and a persisted counter is incremented, so the gap is
+   * visible to operators as well as to the caller through `check`. Returns NotFound for unknown ids.
+   */
+  rocksdb::Status GetDecision(std::string_view decision_id,
+                              DecisionRecord* out,
+                              DecisionCheck* check = nullptr) const;
+
+  /** GetDecision that fails the read: returns Corruption when any referenced body is missing. */
+  rocksdb::Status VerifyDecision(std::string_view decision_id, DecisionRecord* out = nullptr) const;
+
+  /** Decision records in write order, starting after `after_sequence` (0 = from the beginning). */
+  rocksdb::Status ListDecisions(std::vector<DecisionRecord>* out,
+                                uint64_t limit = 0,
+                                uint64_t after_sequence = 0) const;
+
+  /**
+   * Drain the repair queue, then continue the full walk of decision records in write order from where the last
+   * sweep stopped, verifying at most `max_records` records in total. Records that resolve leave the queue;
+   * records that do not stay on it. `stats->queue_size` after the call is the integrity debt.
+   */
+  rocksdb::Status SweepDecisions(uint64_t max_records, DecisionSweepStats* stats);
+
+  /** The content key this store would compute for value_bytes (normalization-aware), for building input_digests. */
+  rocksdb::Status Digest(std::string_view value_bytes, std::string* digest_out) const;
+
   /** Get current approximate total store size in bytes. */
   uint64_t GetTotalStoreBytes() const;
 
@@ -542,7 +635,11 @@ class Store {
   // Get current wall clock time in microseconds (uses custom clock if set)
   uint64_t GetWallClockMicros() const;
 
-  rocksdb::Status PutImpl(std::string_view user_key, std::string_view value_bytes);
+  rocksdb::Status PutImpl(std::string_view user_key, std::string_view value_bytes,
+                          const Decision* decision = nullptr);
+  std::string ComputeDigestKey(std::string_view value_bytes) const;
+  rocksdb::Status CheckDecisionBodies(const DecisionRecord& rec, std::vector<std::string>* missing) const;
+  rocksdb::Status RecordDanglingRead(const DecisionRecord& rec, bool* queued) const;
   rocksdb::Status DeleteImpl(std::string_view user_key);
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
@@ -578,6 +675,8 @@ class Store {
   rocksdb::ColumnFamilyHandle* refcount_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* meta_cf_ = nullptr;
   rocksdb::ColumnFamilyHandle* lru_cf_ = nullptr;  // LRU index for eviction
+  rocksdb::ColumnFamilyHandle* decisions_cf_ = nullptr;  // decision records, write-order index, repair queue, counters
+  mutable std::atomic<uint64_t> next_decision_seq_{1};
 
   // Cached total store size (updated on Put/Delete)
   mutable std::atomic<uint64_t> total_store_bytes_{0};

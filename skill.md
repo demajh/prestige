@@ -42,6 +42,10 @@ curl -s https://raw.githubusercontent.com/demajh/prestige/main/skill.json > ~/.m
   middle step.
 - **Training or evaluation data.** `prestige.dataloaders` deduplicates Hugging Face / PyTorch datasets and measures
   train/test contamination before you fine-tune or benchmark.
+- **Provenance you can audit.** Pass a `prestige.Decision(decision_id, policy_revision, input_digests=...)` to
+  `put` and the record commits in the same transaction as the value. `get_decision` tells you when a referenced
+  body is missing, `sweep_decisions` repairs the queue, and `get_health()["decision_queue_size"]` is your integrity
+  debt. Exact mode only.
 
 ## Install
 
@@ -91,7 +95,7 @@ get `str`. Missing keys raise `prestige.NotFoundError` unless you pass `default=
 opts = prestige.Options()
 opts.default_ttl_seconds = 24 * 3600          # entries expire after a day (per-put TTL also available)
 opts.max_store_bytes = 2 * 1024**3            # cap at 2 GB; least-recently-used values are evicted first
-opts.normalization_mode = prestige.NormalizationMode.kCaseWhitespace   # "Hello  World" == "hello world"
+opts.normalization_mode = prestige.NormalizationMode.kASCII   # "Hello  World" == "hello world"
 with prestige.open("./cache", opts) as cache:
     cache.put("tool:web:https://example.com", page_bytes)
     cache.get_health()                        # size, entries, hit/evict counters, dedup ratio
