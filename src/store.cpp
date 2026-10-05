@@ -18,6 +18,7 @@
 #include <cstring>
 #include <random>
 #include <thread>
+#include <unordered_set>
 
 #include <prestige/internal.hpp>
 #include <prestige/normalize.hpp>
@@ -40,6 +41,7 @@ constexpr const char* kDedupIndexCF  = "prestige_dedup_index";
 constexpr const char* kRefcountCF    = "prestige_refcount";
 constexpr const char* kObjectMetaCF  = "prestige_object_meta";
 constexpr const char* kLRUIndexCF    = "prestige_lru_index";
+constexpr const char* kDecisionsCF   = "prestige_decisions";
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 constexpr const char* kEmbeddingsCF  = "prestige_embeddings";
 constexpr const char* kVectorPendingCF = "prestige_vector_pending";
@@ -143,6 +145,144 @@ inline void BackoffBeforeRetry(const prestige::Options& opt, int attempt,
   }
 }
 
+// --------------------------
+// Decision record encoding
+// --------------------------
+// One column family holds four kinds of keys, told apart by their first byte:
+//   'd' + decision_id        -> serialized DecisionRecord
+//   's' + u64be(sequence)    -> decision_id            (write order; the sweep walks this)
+//   'q' + u64be(sequence)    -> decision_id            (repair queue; priority entries from read-time misses)
+//   'c'                      -> u64be(sequence)        (last sequence the full walk has verified)
+//   'm' + name               -> u64le counter          (dangling_reads, repairs)
+constexpr char kDecRecord = 'd';
+constexpr char kDecSeq = 's';
+constexpr char kDecQueue = 'q';
+constexpr char kDecCursor = 'c';
+constexpr char kDecCounter = 'm';
+constexpr size_t kDecMaxField = 4096;
+constexpr size_t kDecMaxNote = 65536;
+constexpr size_t kDecMaxInputs = 65536;
+
+inline std::string EncodeU64BE(uint64_t v) {
+  std::string out(8, '\0');
+  for (int i = 7; i >= 0; --i) { out[static_cast<size_t>(i)] = static_cast<char>(v & 0xff); v >>= 8; }
+  return out;
+}
+inline bool DecodeU64BE(std::string_view s, uint64_t* out) {
+  if (s.size() != 8) return false;
+  uint64_t v = 0;
+  for (size_t i = 0; i < 8; ++i) v = (v << 8) | static_cast<uint8_t>(s[i]);
+  *out = v;
+  return true;
+}
+inline std::string DecRecordKey(std::string_view id) { std::string k(1, kDecRecord); k.append(id); return k; }
+inline std::string DecSeqKey(uint64_t seq) { return std::string(1, kDecSeq) + EncodeU64BE(seq); }
+inline std::string DecQueueKey(uint64_t seq) { return std::string(1, kDecQueue) + EncodeU64BE(seq); }
+inline std::string DecCursorKey() { return std::string(1, kDecCursor); }
+inline std::string DecCounterKey(std::string_view name) { std::string k(1, kDecCounter); k.append(name); return k; }
+
+inline void AppendU32LE(std::string* out, uint32_t v) {
+  for (int i = 0; i < 4; ++i) out->push_back(static_cast<char>((v >> (8 * i)) & 0xff));
+}
+inline bool ReadU32LE(std::string_view s, size_t* off, uint32_t* v) {
+  if (*off + 4 > s.size()) return false;
+  uint32_t r = 0;
+  for (int i = 3; i >= 0; --i) r = (r << 8) | static_cast<uint8_t>(s[*off + static_cast<size_t>(i)]);
+  *off += 4; *v = r;
+  return true;
+}
+inline void AppendStr(std::string* out, std::string_view v) {
+  AppendU32LE(out, static_cast<uint32_t>(v.size()));
+  out->append(v.data(), v.size());
+}
+inline bool ReadStr(std::string_view s, size_t* off, std::string* v) {
+  uint32_t n = 0;
+  if (!ReadU32LE(s, off, &n)) return false;
+  if (*off + n > s.size()) return false;
+  v->assign(s.data() + *off, n);
+  *off += n;
+  return true;
+}
+
+constexpr uint8_t kDecRecordVersion = 1;
+
+std::string SerializeDecisionRecord(const prestige::DecisionRecord& r) {
+  std::string out;
+  out.push_back(static_cast<char>(kDecRecordVersion));
+  out.append(prestige::internal::EncodeU64LE(r.sequence));
+  out.append(prestige::internal::EncodeU64LE(r.committed_at_us));
+  AppendStr(&out, r.decision.decision_id);
+  AppendStr(&out, r.decision.policy_revision);
+  AppendStr(&out, r.decision.parent_decision_id);
+  AppendStr(&out, r.decision.note);
+  AppendStr(&out, r.user_key);
+  AppendStr(&out, r.output_digest);
+  AppendU32LE(&out, static_cast<uint32_t>(r.decision.input_digests.size()));
+  for (const auto& d : r.decision.input_digests) AppendStr(&out, d);
+  return out;
+}
+
+bool DeserializeDecisionRecord(std::string_view s, prestige::DecisionRecord* r) {
+  if (s.size() < 17 || static_cast<uint8_t>(s[0]) != kDecRecordVersion) return false;
+  size_t off = 1;
+  if (!prestige::internal::DecodeU64LE(s.substr(off, 8), &r->sequence)) return false;
+  off += 8;
+  if (!prestige::internal::DecodeU64LE(s.substr(off, 8), &r->committed_at_us)) return false;
+  off += 8;
+  if (!ReadStr(s, &off, &r->decision.decision_id)) return false;
+  if (!ReadStr(s, &off, &r->decision.policy_revision)) return false;
+  if (!ReadStr(s, &off, &r->decision.parent_decision_id)) return false;
+  if (!ReadStr(s, &off, &r->decision.note)) return false;
+  if (!ReadStr(s, &off, &r->user_key)) return false;
+  if (!ReadStr(s, &off, &r->output_digest)) return false;
+  uint32_t n = 0;
+  if (!ReadU32LE(s, &off, &n)) return false;
+  if (n > kDecMaxInputs) return false;
+  r->decision.input_digests.clear();
+  r->decision.input_digests.reserve(n);
+  for (uint32_t i = 0; i < n; ++i) {
+    std::string d;
+    if (!ReadStr(s, &off, &d)) return false;
+    r->decision.input_digests.push_back(std::move(d));
+  }
+  return off == s.size();
+}
+
+// Read a persisted counter outside a transaction.
+inline uint64_t ReadDecisionCounter(rocksdb::TransactionDB* db, rocksdb::ColumnFamilyHandle* cf,
+                                    const rocksdb::ReadOptions& ro, std::string_view name) {
+  std::string raw;
+  uint64_t v = 0;
+  if (db->Get(ro, cf, rocksdb::Slice(DecCounterKey(name)), &raw).ok()) {
+    prestige::internal::DecodeU64LE(raw, &v);
+  }
+  return v;
+}
+
+// Increment a persisted counter inside a transaction (locks the key).
+inline rocksdb::Status BumpDecisionCounterLocked(rocksdb::Transaction* txn, rocksdb::ColumnFamilyHandle* cf,
+                                                 std::string_view name, uint64_t delta) {
+  rocksdb::ReadOptions ro;
+  std::string raw;
+  uint64_t v = 0;
+  const std::string key = DecCounterKey(name);
+  rocksdb::Status s = txn->GetForUpdate(ro, cf, rocksdb::Slice(key), &raw);
+  if (s.ok()) {
+    if (!prestige::internal::DecodeU64LE(raw, &v)) return rocksdb::Status::Corruption("decision counter is not uint64_le");
+  } else if (!s.IsNotFound()) {
+    return s;
+  }
+  return txn->Put(cf, rocksdb::Slice(key), rocksdb::Slice(prestige::internal::EncodeU64LE(v + delta)));
+}
+
+inline uint64_t CountDecisionPrefix(rocksdb::TransactionDB* db, rocksdb::ColumnFamilyHandle* cf,
+                                    const rocksdb::ReadOptions& ro, char prefix) {
+  uint64_t n = 0;
+  std::unique_ptr<rocksdb::Iterator> it(db->NewIterator(ro, cf));
+  for (it->Seek(rocksdb::Slice(&prefix, 1)); it->Valid() && it->key().size() > 0 && it->key()[0] == prefix; it->Next()) ++n;
+  return n;
+}
+
 }  // namespace
 
 // Forward declaration for cache management methods
@@ -219,6 +359,7 @@ rocksdb::Status Store::Open(const std::string& db_path,
   cfs.emplace_back(kRefcountCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kObjectMetaCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kLRUIndexCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
+  cfs.emplace_back(kDecisionsCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Add embeddings and vector pending CFs for semantic mode
@@ -247,12 +388,25 @@ rocksdb::Status Store::Open(const std::string& db_path,
   store->refcount_cf_= store->handles_[4];
   store->meta_cf_    = store->handles_[5];
   store->lru_cf_     = store->handles_[6];
+  store->decisions_cf_ = store->handles_[7];
+
+  // Continue decision sequence numbers after the highest one on disk
+  {
+    rocksdb::ReadOptions ro;
+    std::unique_ptr<rocksdb::Iterator> it(store->db_->NewIterator(ro, store->decisions_cf_));
+    it->SeekForPrev(rocksdb::Slice(std::string(1, kDecSeq) + std::string(8, '\xff')));
+    uint64_t last = 0;
+    if (it->Valid() && it->key().size() == 9 && it->key()[0] == kDecSeq) {
+      DecodeU64BE(std::string_view(it->key().data() + 1, 8), &last);
+    }
+    store->next_decision_seq_.store(last + 1);
+  }
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Initialize semantic dedup components
   if (opt.dedup_mode == DedupMode::kSemantic) {
-    store->embeddings_cf_ = store->handles_[7];
-    store->vector_pending_cf_ = store->handles_[8];
+    store->embeddings_cf_ = store->handles_[8];
+    store->vector_pending_cf_ = store->handles_[9];
 
     // Convert device option (used for both embedder and reranker)
     internal::InferenceDevice device_type = internal::InferenceDevice::kAuto;
@@ -1028,6 +1182,12 @@ rocksdb::Status Store::GetHealth(HealthStats* stats) const {
     }
   }
 
+  // Decision records: how many exist, how many wait for repair, and the lifetime counters
+  stats->decisions_total = CountDecisionPrefix(db_, decisions_cf_, ro, kDecRecord);
+  stats->decision_queue_size = CountDecisionPrefix(db_, decisions_cf_, ro, kDecQueue);
+  stats->decision_dangling_reads = ReadDecisionCounter(db_, decisions_cf_, ro, "dangling_reads");
+  stats->decision_repairs = ReadDecisionCounter(db_, decisions_cf_, ro, "repairs");
+
   db_->ReleaseSnapshot(snapshot);
 
   // Calculate derived stats
@@ -1042,6 +1202,270 @@ rocksdb::Status Store::GetHealth(HealthStats* stats) const {
                          static_cast<double>(stats->total_objects);
   }
 
+  return rocksdb::Status::OK();
+}
+
+// ---------------------------------------------------------------------------
+// Decision records (provenance)
+// ---------------------------------------------------------------------------
+
+std::string Store::ComputeDigestKey(std::string_view value_bytes) const {
+  // Mirrors the digest computation in PutImpl (kept separate there for its per-step telemetry).
+  std::string normalized_value;
+  std::string_view digest_input = value_bytes;
+  if (opt_.normalization_mode != NormalizationMode::kNone) {
+    if (opt_.normalization_max_bytes == 0 || value_bytes.size() <= opt_.normalization_max_bytes) {
+      normalized_value = prestige::internal::Normalize(value_bytes, opt_.normalization_mode);
+      digest_input = normalized_value;
+    }
+  }
+  auto digest = prestige::internal::Sha256::Digest(digest_input);
+  return prestige::internal::ToBytes(digest.data(), digest.size());
+}
+
+rocksdb::Status Store::Digest(std::string_view value_bytes, std::string* digest_out) const {
+  if (!digest_out) return rocksdb::Status::InvalidArgument("digest_out is null");
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  if (opt_.dedup_mode == DedupMode::kSemantic) {
+    return rocksdb::Status::InvalidArgument("Digest is only defined in exact mode");
+  }
+#endif
+  *digest_out = ComputeDigestKey(value_bytes);
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::PutWithDecision(std::string_view user_key,
+                                       std::string_view value_bytes,
+                                       const Decision& decision) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (decision.decision_id.empty()) return rocksdb::Status::InvalidArgument("decision_id is required");
+  if (decision.decision_id.size() > kDecMaxField) return rocksdb::Status::InvalidArgument("decision_id is too long");
+  if (decision.policy_revision.empty()) return rocksdb::Status::InvalidArgument("policy_revision is required");
+  if (decision.policy_revision.size() > kDecMaxField) return rocksdb::Status::InvalidArgument("policy_revision is too long");
+  if (decision.parent_decision_id.size() > kDecMaxField) return rocksdb::Status::InvalidArgument("parent_decision_id is too long");
+  if (decision.note.size() > kDecMaxNote) return rocksdb::Status::InvalidArgument("note is too long");
+  if (decision.input_digests.size() > kDecMaxInputs) return rocksdb::Status::InvalidArgument("too many input digests");
+  for (const auto& d : decision.input_digests) {
+    if (d.size() != 32) {
+      return rocksdb::Status::InvalidArgument("input digests must be 32-byte SHA-256 digests (see Store::Digest)");
+    }
+  }
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  if (opt_.dedup_mode == DedupMode::kSemantic) {
+    return rocksdb::Status::InvalidArgument("decision records are not supported in semantic mode");
+  }
+#endif
+  return PutImpl(user_key, value_bytes, &decision);
+}
+
+rocksdb::Status Store::CheckDecisionBodies(const DecisionRecord& rec, std::vector<std::string>* missing) const {
+  missing->clear();
+  rocksdb::ReadOptions ro;
+  auto resolves = [&](const std::string& digest) -> bool {
+    std::string obj_id;
+    if (!db_->Get(ro, dedup_cf_, rocksdb::Slice(digest), &obj_id).ok()) return false;
+    std::string meta_raw;
+    return db_->Get(ro, meta_cf_, rocksdb::Slice(obj_id), &meta_raw).ok();
+  };
+  if (!rec.output_digest.empty() && !resolves(rec.output_digest)) missing->push_back(rec.output_digest);
+  for (const auto& d : rec.decision.input_digests) {
+    if (!resolves(d)) missing->push_back(d);
+  }
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::RecordDanglingRead(const DecisionRecord& rec, bool* queued) const {
+  *queued = false;
+  rocksdb::WriteOptions wo;
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+  const std::string qkey = DecQueueKey(rec.sequence);
+  for (int attempt = 0; attempt < opt_.max_retries; ++attempt) {
+    std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+    if (!txn) return rocksdb::Status::IOError("BeginTransaction returned null");
+    rocksdb::ReadOptions ro;
+    std::string existing;
+    bool newly_queued = false;
+    rocksdb::Status s = txn->GetForUpdate(ro, decisions_cf_, rocksdb::Slice(qkey), &existing);
+    if (s.IsNotFound()) {
+      s = txn->Put(decisions_cf_, rocksdb::Slice(qkey), rocksdb::Slice(rec.decision.decision_id));
+      newly_queued = true;
+    }
+    if (s.ok()) s = BumpDecisionCounterLocked(txn.get(), decisions_cf_, "dangling_reads", 1);
+    if (s.ok()) s = txn->Commit();
+    if (s.ok()) {
+      *queued = newly_queued;
+      return s;
+    }
+    if (!prestige::internal::IsRetryableTxnStatus(s)) return s;
+    BackoffBeforeRetry(opt_, attempt, nullptr);
+  }
+  return rocksdb::Status::TimedOut("RecordDanglingRead exceeded max_retries");
+}
+
+rocksdb::Status Store::GetDecision(std::string_view decision_id,
+                                   DecisionRecord* out,
+                                   DecisionCheck* check) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  EmitCounter(opt_, "prestige.decision.get_total", 1);
+
+  rocksdb::ReadOptions ro;
+  std::string raw;
+  rocksdb::Status s = db_->Get(ro, decisions_cf_, rocksdb::Slice(DecRecordKey(decision_id)), &raw);
+  if (!s.ok()) return s;
+  if (!DeserializeDecisionRecord(raw, out)) return rocksdb::Status::Corruption("decision record is malformed");
+
+  std::vector<std::string> missing;
+  CheckDecisionBodies(*out, &missing);
+  if (check) {
+    check->resolved = missing.empty();
+    check->missing_digests = missing;
+    check->queued_for_repair = false;
+  }
+  if (!missing.empty()) {
+    // The read-time guard: count the miss and queue the record for a priority sweep. The read itself still
+    // succeeds so the caller can see what is missing; VerifyDecision is the failing variant.
+    EmitCounter(opt_, "prestige.decision.dangling_read_total", 1);
+    bool queued = false;
+    rocksdb::Status rs = RecordDanglingRead(*out, &queued);
+    if (!rs.ok()) EmitCounter(opt_, "prestige.decision.bookkeeping_error_total", 1);
+    if (check) check->queued_for_repair = queued;
+  }
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::VerifyDecision(std::string_view decision_id, DecisionRecord* out) const {
+  DecisionRecord rec;
+  DecisionCheck check;
+  rocksdb::Status s = GetDecision(decision_id, &rec, &check);
+  if (!s.ok()) return s;
+  if (out) *out = rec;
+  if (!check.resolved) {
+    return rocksdb::Status::Corruption("decision " + std::string(decision_id) + " references " +
+                                       std::to_string(check.missing_digests.size()) + " missing bodies");
+  }
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::ListDecisions(std::vector<DecisionRecord>* out,
+                                     uint64_t limit,
+                                     uint64_t after_sequence) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  out->clear();
+  rocksdb::ReadOptions ro;
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, decisions_cf_));
+  for (it->Seek(rocksdb::Slice(DecSeqKey(after_sequence + 1)));
+       it->Valid() && it->key().size() == 9 && it->key()[0] == kDecSeq; it->Next()) {
+    std::string raw;
+    rocksdb::Status s = db_->Get(ro, decisions_cf_, rocksdb::Slice(DecRecordKey(std::string_view(it->value().data(), it->value().size()))), &raw);
+    if (!s.ok()) continue;  // index entry without a record is reported by the sweep, not here
+    DecisionRecord rec;
+    if (!DeserializeDecisionRecord(raw, &rec)) continue;
+    out->push_back(std::move(rec));
+    if (limit > 0 && out->size() >= limit) break;
+  }
+  return it->status();
+}
+
+rocksdb::Status Store::SweepDecisions(uint64_t max_records, DecisionSweepStats* stats) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!stats) return rocksdb::Status::InvalidArgument("stats is null");
+  *stats = DecisionSweepStats{};
+  if (max_records == 0) max_records = UINT64_MAX;
+
+  rocksdb::ReadOptions ro;
+  rocksdb::WriteOptions wo;
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+
+  auto load = [&](std::string_view decision_id, DecisionRecord* rec) -> bool {
+    std::string raw;
+    if (!db_->Get(ro, decisions_cf_, rocksdb::Slice(DecRecordKey(decision_id)), &raw).ok()) return false;
+    return DeserializeDecisionRecord(raw, rec);
+  };
+
+  // Sequences verified during the queue phase; the walk below skips them so a record counts once per sweep.
+  std::unordered_set<uint64_t> handled;
+
+  // 1) Drain the queue: priority entries first, in write order.
+  {
+    std::vector<std::pair<std::string, std::string>> queued;  // (queue key, decision id)
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, decisions_cf_));
+    for (it->Seek(rocksdb::Slice(std::string(1, kDecQueue)));
+         it->Valid() && it->key().size() == 9 && it->key()[0] == kDecQueue && queued.size() < max_records; it->Next()) {
+      queued.emplace_back(it->key().ToString(), it->value().ToString());
+    }
+    for (const auto& [qkey, id] : queued) {
+      stats->checked++;
+      uint64_t qseq = 0;
+      DecodeU64BE(std::string_view(qkey.data() + 1, 8), &qseq);
+      handled.insert(qseq);
+      DecisionRecord rec;
+      std::vector<std::string> missing;
+      const bool have = load(id, &rec);
+      if (have) CheckDecisionBodies(rec, &missing);
+      if (have && !missing.empty()) {
+        stats->dangling++;
+        continue;  // still waiting for its bodies
+      }
+      // Resolved (or the record itself is gone): leave the queue and count the repair
+      std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+      if (!txn) continue;
+      rocksdb::Status s = txn->Delete(decisions_cf_, rocksdb::Slice(qkey));
+      if (s.ok() && have) s = BumpDecisionCounterLocked(txn.get(), decisions_cf_, "repairs", 1);
+      if (s.ok()) s = txn->Commit();
+      if (s.ok() && have) stats->repaired++;
+    }
+  }
+
+  // 2) Continue the full walk from the cursor, in write order, with the remaining budget.
+  uint64_t cursor = 0;
+  {
+    std::string raw;
+    if (db_->Get(ro, decisions_cf_, rocksdb::Slice(DecCursorKey()), &raw).ok()) DecodeU64BE(raw, &cursor);
+  }
+  {
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, decisions_cf_));
+    for (it->Seek(rocksdb::Slice(DecSeqKey(cursor + 1)));
+         it->Valid() && it->key().size() == 9 && it->key()[0] == kDecSeq && stats->checked < max_records; it->Next()) {
+      uint64_t seq = 0;
+      DecodeU64BE(std::string_view(it->key().data() + 1, 8), &seq);
+      cursor = seq;
+      if (handled.count(seq)) continue;  // verified in the queue phase of this call
+      const std::string id = it->value().ToString();
+      stats->checked++;
+      DecisionRecord rec;
+      std::vector<std::string> missing;
+      if (!load(id, &rec)) {
+        missing.push_back(std::string());  // index entry whose record is missing: treat as dangling
+      } else {
+        CheckDecisionBodies(rec, &missing);
+      }
+      if (missing.empty()) continue;
+      stats->dangling++;
+      std::string existing;
+      if (db_->Get(ro, decisions_cf_, rocksdb::Slice(DecQueueKey(seq)), &existing).ok()) continue;  // already queued
+      std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+      if (!txn) continue;
+      rocksdb::Status s = txn->Put(decisions_cf_, rocksdb::Slice(DecQueueKey(seq)), rocksdb::Slice(id));
+      if (s.ok()) s = txn->Commit();
+      (void)s;
+    }
+  }
+  {
+    rocksdb::Status s = db_->Put(wo, decisions_cf_, rocksdb::Slice(DecCursorKey()), rocksdb::Slice(EncodeU64BE(cursor)));
+    if (!s.ok()) return s;
+  }
+
+  stats->cursor_sequence = cursor;
+  stats->max_sequence = next_decision_seq_.load() - 1;
+  stats->queue_size = CountDecisionPrefix(db_, decisions_cf_, ro, kDecQueue);
+
+  EmitCounter(opt_, "prestige.decision.sweep_checked_total", stats->checked);
+  EmitCounter(opt_, "prestige.decision.repaired_total", stats->repaired);
+  EmitGauge(opt_, "prestige.decision.queue_size", static_cast<double>(stats->queue_size));
   return rocksdb::Status::OK();
 }
 
@@ -1225,7 +1649,8 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
   return rocksdb::Status::OK();
 }
 
-rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value_bytes) {
+rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value_bytes,
+                               const Decision* decision) {
   EmitCounter(opt_, "prestige.put.calls", 1);
   EmitHistogram(opt_, "prestige.put.value_bytes", static_cast<uint64_t>(value_bytes.size()));
 
@@ -1238,6 +1663,9 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // For semantic mode, compute embedding instead of SHA-256
   if (opt_.dedup_mode == DedupMode::kSemantic) {
+    if (decision) {
+      return rocksdb::Status::InvalidArgument("decision records are not supported in semantic mode");
+    }
     return PutImplSemantic(user_key, value_bytes, span.get(), op_start_us);
   }
 #endif
@@ -1275,6 +1703,9 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
   int attempts_used = 0;
   uint64_t total_wait_us = 0;  // Time spent waiting on retries
   int batch_writes = 0;         // Number of CF writes in this Put
+  // A decision takes its sequence number once, so retries do not burn numbers.
+  const uint64_t decision_seq = decision ? next_decision_seq_.fetch_add(1) : 0;
+  bool decision_replayed = false;
 
   auto finish = [&](const rocksdb::Status& st) -> rocksdb::Status {
     const uint64_t dur_us = prestige::internal::NowMicros() - op_start_us;
@@ -1301,6 +1732,8 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
       SpanAttr(span.get(), "dedup_hit", static_cast<uint64_t>(dedup_hit_final ? 1 : 0));
       SpanAttr(span.get(), "had_old", static_cast<uint64_t>(had_old_final ? 1 : 0));
       SpanAttr(span.get(), "noop_overwrite", static_cast<uint64_t>(noop_overwrite ? 1 : 0));
+      SpanAttr(span.get(), "decision", static_cast<uint64_t>(decision ? 1 : 0));
+      SpanAttr(span.get(), "decision_replayed", static_cast<uint64_t>(decision_replayed ? 1 : 0));
       SpanAttr(span.get(), "status", StatusKind(st));
       span->End(st);
     }
@@ -1414,14 +1847,49 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
 
     had_old_final = had_old;
 
-    // If overwrite maps to same object_id, nothing to do
-    if (had_old && old_obj_id == obj_id) {
+    const bool same_object = had_old && old_obj_id == obj_id;
+
+    // Decision record: lock it first so a replayed decision is recognized and a reused id is refused.
+    if (decision) {
+      std::string existing_raw;
+      rocksdb::Status ds = txn->GetForUpdate(ro, decisions_cf_,
+                                             rocksdb::Slice(DecRecordKey(decision->decision_id)), &existing_raw);
+      if (ds.ok()) {
+        DecisionRecord existing;
+        if (!DeserializeDecisionRecord(existing_raw, &existing)) {
+          return finish(rocksdb::Status::Corruption("existing decision record is malformed"));
+        }
+        if (existing.user_key == user_key && existing.output_digest == digest_key) {
+          decision_replayed = true;
+          EmitCounter(opt_, "prestige.decision.replayed_total", 1);
+          txn->Rollback();
+          return finish(rocksdb::Status::OK());
+        }
+        return finish(rocksdb::Status::InvalidArgument("decision_id already records a different write"));
+      }
+      if (!ds.IsNotFound()) {
+        if (prestige::internal::IsRetryableTxnStatus(ds)) {
+          EmitCounter(opt_, "prestige.put.retry_total", 1);
+          SpanEvent(span.get(), "retry.decision_lock");
+          BackoffBeforeRetry(opt_, attempt, span.get());
+          total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
+          attempt_start_us = prestige::internal::NowMicros();
+          continue;
+        }
+        return finish(ds);
+      }
+    }
+
+    // If overwrite maps to same object_id and there is no decision to record, nothing to do
+    if (same_object && !decision) {
       noop_overwrite = true;
       EmitCounter(opt_, "prestige.put.noop_overwrite_total", 1);
       txn->Rollback();
       return finish(rocksdb::Status::OK());
     }
+    if (same_object) noop_overwrite = true;
 
+    if (!same_object) {
     // user_key -> obj_id
     {
       rocksdb::Status s = txn->Put(
@@ -1457,6 +1925,26 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
         EmitCounter(opt_, "prestige.gc.deleted_objects_total", 1);
         SpanEvent(span.get(), "gc.delete_object");
       }
+    }
+
+    }  // !same_object
+
+    // The decision record commits with the value it explains, never beside it.
+    if (decision) {
+      DecisionRecord rec;
+      rec.decision = *decision;
+      rec.sequence = decision_seq;
+      rec.committed_at_us = GetWallClockMicros();
+      rec.user_key.assign(user_key.data(), user_key.size());
+      rec.output_digest = digest_key;
+      rocksdb::Status ws = txn->Put(decisions_cf_, rocksdb::Slice(DecRecordKey(decision->decision_id)),
+                                    rocksdb::Slice(SerializeDecisionRecord(rec)));
+      if (!ws.ok()) return finish(ws);
+      ws = txn->Put(decisions_cf_, rocksdb::Slice(DecSeqKey(decision_seq)),
+                    rocksdb::Slice(decision->decision_id));
+      if (!ws.ok()) return finish(ws);
+      batch_writes += 2;
+      EmitCounter(opt_, "prestige.decision.recorded_total", 1);
     }
 
     const uint64_t commit_start_us = prestige::internal::NowMicros();

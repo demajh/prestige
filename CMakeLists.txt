@@ -362,6 +362,7 @@ if(PRESTIGE_BUILD_TESTS)
     tests/reranker_test.cpp
     tests/judge_test.cpp
     tests/crash_test.cpp
+    tests/decision_test.cpp
   )
 
   target_link_libraries(prestige_tests

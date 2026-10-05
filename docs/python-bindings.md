@@ -441,6 +441,31 @@ with prestige.open("/tmp/semantic_db", options) as store:
     # May deduplicate if semantically similar
 ```
 
+### Decision Records
+
+Commit the reason for a write together with the write itself (see [Decision records](provenance.md)):
+
+```python
+import prestige
+
+with prestige.open("./store") as store:
+    inputs = [store.digest(observation)]          # content keys of what the decision consumed
+    store.put("memory/summary/42", summary,
+              decision=prestige.Decision("dec-0001", "policy@3f9c2a",
+                                         parent_decision_id="dec-0000",
+                                         input_digests=inputs, note="nightly consolidation"))
+
+    rec = store.get_decision("dec-0001")
+    rec["resolved"], rec["missing_digests"]       # the read-time guard reports dangling bodies
+    store.get_decision("dec-0001", strict=True)   # CorruptionError when a body is missing
+    store.sweep_decisions(max_records=10000)      # drains the repair queue; returns queue_size (integrity debt)
+    store.list_decisions(limit=100)               # write order
+    store.get_health()["decision_queue_size"]
+```
+
+`Decision.input_digests` accepts 32-byte `bytes` or 64-character hex strings. Replaying a decision for the same
+write is a no-op; reusing an id for a different write raises `InvalidArgumentError`. Exact mode only.
+
 ### Cache Management
 
 ```python
