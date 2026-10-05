@@ -466,6 +466,30 @@ with prestige.open("./store") as store:
 `Decision.input_digests` accepts 32-byte `bytes` or 64-character hex strings. Replaying a decision for the same
 write is a no-op; reusing an id for a different write raises `InvalidArgumentError`. Exact mode only.
 
+### Candidates, Metadata and Outcomes
+
+Let the store rank and the caller decide (see [Candidates and outcomes](candidates.md)):
+
+```python
+store.put("faq/42", answer, metadata={"family": "support-faq@v3", "tool": "resolver/1.4"})
+store.get_metadata("faq/42")                       # {'family': ..., 'tool': ...}
+
+cands = store.candidates(query, k=5, filter={"family": "support-faq@v3"}, min_similarity=0.85)
+# [{'rank': 0, 'similarity': 0.97, 'reranker_score': None, 'object_id': b'...', 'digest': b'...',
+#   'metadata': {...}, 'size_bytes': 812, 'created_at_us': ...}, ...]
+
+store.record_outcome("support-faq@v3", "accepted", candidate=cands[0], threshold=0.92)
+store.record_outcome("support-faq@v3", "rejected", candidate=cands[0], threshold=0.92, reason="tenant mismatch")
+store.record_outcome("support-faq@v3", "no_candidate")
+
+store.family_report("support-faq@v3")   # accepted, rejected, false_accept_rate, histograms, suggested_threshold
+store.list_outcomes("support-faq@v3", limit=100)
+store.list_families()
+```
+
+Exact-mode stores (the PyPI wheel) return the identical value at similarity 1.0 or an empty list; semantic stores
+search the vector index.
+
 ### Cache Management
 
 ```python

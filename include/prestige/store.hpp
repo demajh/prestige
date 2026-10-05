@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <map>
 #include <vector>
 
 #include <rocksdb/cache.h>
@@ -445,6 +446,76 @@ struct DecisionSweepStats {
 };
 
 /**
+ * Caller-supplied metadata attached to a stored value: small string pairs such as the task family that produced
+ * it, the tool version and the constraint-schema version. It is returned with every candidate. Metadata belongs
+ * to the value: writing the same bytes again with metadata merges the maps, later pairs winning per key.
+ */
+using Metadata = std::map<std::string, std::string>;
+
+/** One stored value near a query value. The store ranks and scores; the caller decides. */
+struct Candidate {
+  size_t rank = 0;               // 0 is the nearest
+  float similarity = 0.0f;       // cosine similarity to the query (exact mode: 1.0 for the identical value)
+  float reranker_score = -1.0f;  // cross-encoder score when the reranker is enabled, -1 otherwise
+  std::string object_id;         // internal object id
+  std::string digest;            // content key of the stored value (empty when unknown)
+  Metadata metadata;             // metadata stored with the value
+  uint64_t size_bytes = 0;
+  uint64_t created_at_us = 0;
+  std::string value;             // the stored bytes, only when CandidateQuery::include_values is set
+};
+
+struct CandidateQuery {
+  size_t k = 10;                 // maximum number of candidates
+  Metadata filter;               // keep only candidates whose metadata contains every pair of the filter
+  float min_similarity = -1.0f;  // drop candidates below this cosine similarity (-1 = no floor)
+  bool include_values = false;   // also return the stored bytes
+};
+
+/** What the caller decided about a candidate, recorded per task family for calibration. */
+enum class OutcomeVerdict : uint8_t {
+  kAccepted = 1,     // the candidate passed the caller's checks and was reused
+  kRejected = 2,     // above the caller's threshold but failed a constraint check: a false accept of the similarity gate
+  kNoCandidate = 3,  // nothing above the caller's threshold; a fresh computation followed
+};
+
+struct Outcome {
+  std::string family_id;            // required: explicit, versioned task-family id, e.g. "support-faq@v3"
+  OutcomeVerdict verdict = OutcomeVerdict::kAccepted;
+  std::string tool_version;         // optional
+  std::string schema_version;       // optional: constraint-schema version in force
+  std::string candidate_object_id;  // optional: the candidate that was judged
+  std::string candidate_digest;     // optional
+  uint32_t rank = 0;                // its rank in the list the caller saw
+  float similarity = -1.0f;         // its cosine similarity (-1 = not recorded)
+  float reranker_score = -1.0f;     // its reranker score (-1 = none)
+  float threshold = -1.0f;          // the threshold the caller applied (-1 = not recorded)
+  std::string reason;               // optional: which constraint failed
+};
+
+struct OutcomeRecord {
+  Outcome outcome;
+  uint64_t sequence = 0;
+  uint64_t recorded_at_us = 0;
+};
+
+/** Per-family calibration report computed from recorded outcomes. */
+struct FamilyReport {
+  std::string family_id;
+  uint64_t accepted = 0;
+  uint64_t rejected = 0;
+  uint64_t no_candidate = 0;
+  double false_accept_rate = 0.0;                  // rejected / (accepted + rejected)
+  std::vector<uint64_t> accepted_similarity_hist;  // 20 buckets over [0, 1]
+  std::vector<uint64_t> rejected_similarity_hist;  // 20 buckets over [0, 1]
+  std::vector<uint64_t> rejected_rank_hist;        // index = rank; the last bucket holds rank 15 and above
+  float suggested_threshold = -1.0f;               // advisory: lowest bucket edge with at most 5% false accepts above it
+  uint64_t first_sequence = 0;
+  uint64_t last_sequence = 0;
+  uint64_t last_recorded_at_us = 0;
+};
+
+/**
  * prestige::Store
  *
  * A RocksDB-backed KV store with unique-value semantics:
@@ -626,6 +697,44 @@ class Store {
   /** The content key this store would compute for value_bytes (normalization-aware), for building input_digests. */
   rocksdb::Status Digest(std::string_view value_bytes, std::string* digest_out) const;
 
+  // ---------------------------------------------------------------------------
+  // Candidates, value metadata and outcomes. See docs/candidates.md.
+  // ---------------------------------------------------------------------------
+
+  /** Put with metadata attached to the stored value (merged into the value's existing metadata). */
+  rocksdb::Status Put(std::string_view user_key, std::string_view value_bytes, const Metadata& metadata);
+  rocksdb::Status PutWithDecision(std::string_view user_key,
+                                  std::string_view value_bytes,
+                                  const Decision& decision,
+                                  const Metadata& metadata);
+
+  /** Metadata stored with the value behind user_key (an empty map when there is none). */
+  rocksdb::Status GetMetadata(std::string_view user_key, Metadata* out) const;
+
+  /**
+   * The nearest stored values to value_bytes, ranked by similarity, each with its metadata. The store does not
+   * decide whether any of them is a hit: the caller applies its thresholds and constraint checks. Exact mode
+   * returns the identical value at similarity 1.0 or nothing; semantic mode searches the vector index.
+   */
+  rocksdb::Status Candidates(std::string_view value_bytes,
+                             const CandidateQuery& query,
+                             std::vector<Candidate>* out) const;
+
+  /** Record what the caller decided about a candidate, keyed by its task family, for calibration. */
+  rocksdb::Status RecordOutcome(const Outcome& outcome, uint64_t* sequence_out = nullptr);
+
+  /** Outcomes of one family in the order they were recorded. */
+  rocksdb::Status ListOutcomes(std::string_view family_id,
+                               std::vector<OutcomeRecord>* out,
+                               uint64_t limit = 0,
+                               uint64_t after_sequence = 0) const;
+
+  /** False-accept rate and the similarity and rank distributions of one family's outcomes. */
+  rocksdb::Status GetFamilyReport(std::string_view family_id, FamilyReport* out) const;
+
+  /** Every family with at least one recorded outcome. */
+  rocksdb::Status ListFamilies(std::vector<std::string>* out) const;
+
   /** Get current approximate total store size in bytes. */
   uint64_t GetTotalStoreBytes() const;
 
@@ -636,7 +745,8 @@ class Store {
   uint64_t GetWallClockMicros() const;
 
   rocksdb::Status PutImpl(std::string_view user_key, std::string_view value_bytes,
-                          const Decision* decision = nullptr);
+                          const Decision* decision = nullptr, const Metadata* metadata = nullptr);
+  bool FillCandidate(Candidate* c, const rocksdb::ReadOptions& ro, const CandidateQuery& query) const;
   std::string ComputeDigestKey(std::string_view value_bytes) const;
   rocksdb::Status CheckDecisionBodies(const DecisionRecord& rec, std::vector<std::string>* missing) const;
   rocksdb::Status RecordDanglingRead(const DecisionRecord& rec, bool* queued) const;
@@ -646,7 +756,12 @@ class Store {
   rocksdb::Status PutImplSemantic(std::string_view user_key,
                                    std::string_view value_bytes,
                                    TraceSpan* span,
-                                   uint64_t op_start_us);
+                                   uint64_t op_start_us,
+                                   const Metadata* metadata);
+  rocksdb::Status CandidatesSemantic(std::string_view value_bytes,
+                                     const CandidateQuery& query,
+                                     size_t k,
+                                     std::vector<Candidate>* out) const;
   rocksdb::Status DeleteSemanticObject(rocksdb::Transaction* txn,
                                         const std::string& obj_id);
   // Apply pending vector index operations after successful commit
@@ -677,6 +792,8 @@ class Store {
   rocksdb::ColumnFamilyHandle* lru_cf_ = nullptr;  // LRU index for eviction
   rocksdb::ColumnFamilyHandle* decisions_cf_ = nullptr;  // decision records, write-order index, repair queue, counters
   mutable std::atomic<uint64_t> next_decision_seq_{1};
+  rocksdb::ColumnFamilyHandle* value_meta_cf_ = nullptr;  // caller metadata per object
+  rocksdb::ColumnFamilyHandle* outcomes_cf_ = nullptr;    // outcome records per family, counters
 
   // Cached total store size (updated on Put/Delete)
   mutable std::atomic<uint64_t> total_store_bytes_{0};
