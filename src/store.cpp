@@ -42,6 +42,8 @@ constexpr const char* kRefcountCF    = "prestige_refcount";
 constexpr const char* kObjectMetaCF  = "prestige_object_meta";
 constexpr const char* kLRUIndexCF    = "prestige_lru_index";
 constexpr const char* kDecisionsCF   = "prestige_decisions";
+constexpr const char* kValueMetaCF   = "prestige_value_meta";
+constexpr const char* kOutcomesCF    = "prestige_outcomes";
 #ifdef PRESTIGE_ENABLE_SEMANTIC
 constexpr const char* kEmbeddingsCF  = "prestige_embeddings";
 constexpr const char* kVectorPendingCF = "prestige_vector_pending";
@@ -283,6 +285,140 @@ inline uint64_t CountDecisionPrefix(rocksdb::TransactionDB* db, rocksdb::ColumnF
   return n;
 }
 
+// --------------------------
+// Value metadata and outcome encoding
+// --------------------------
+constexpr size_t kMetaMaxPairs = 64;
+constexpr size_t kMetaMaxKey = 256;
+constexpr size_t kMetaMaxValue = 4096;
+constexpr uint8_t kMetaVersion = 1;
+
+rocksdb::Status ValidateMetadata(const prestige::Metadata& m) {
+  if (m.size() > kMetaMaxPairs) return rocksdb::Status::InvalidArgument("too many metadata pairs");
+  for (const auto& [k, v] : m) {
+    if (k.empty()) return rocksdb::Status::InvalidArgument("metadata keys must not be empty");
+    if (k.size() > kMetaMaxKey) return rocksdb::Status::InvalidArgument("metadata key is too long");
+    if (v.size() > kMetaMaxValue) return rocksdb::Status::InvalidArgument("metadata value is too long");
+  }
+  return rocksdb::Status::OK();
+}
+
+std::string SerializeMetadata(const prestige::Metadata& m) {
+  std::string out;
+  out.push_back(static_cast<char>(kMetaVersion));
+  AppendU32LE(&out, static_cast<uint32_t>(m.size()));
+  for (const auto& [k, v] : m) {
+    AppendStr(&out, k);
+    AppendStr(&out, v);
+  }
+  return out;
+}
+
+bool DeserializeMetadata(std::string_view s, prestige::Metadata* m) {
+  m->clear();
+  if (s.size() < 5 || static_cast<uint8_t>(s[0]) != kMetaVersion) return false;
+  size_t off = 1;
+  uint32_t n = 0;
+  if (!ReadU32LE(s, &off, &n)) return false;
+  for (uint32_t i = 0; i < n; ++i) {
+    std::string k, v;
+    if (!ReadStr(s, &off, &k) || !ReadStr(s, &off, &v)) return false;
+    (*m)[std::move(k)] = std::move(v);
+  }
+  return off == s.size();
+}
+
+// Merge `extra` into the metadata stored for obj_id (locks the row). Later pairs win per key.
+rocksdb::Status MergeMetadataLocked(rocksdb::Transaction* txn, rocksdb::ColumnFamilyHandle* cf,
+                                    const std::string& obj_id, const prestige::Metadata& extra) {
+  rocksdb::ReadOptions ro;
+  std::string raw;
+  prestige::Metadata merged;
+  rocksdb::Status s = txn->GetForUpdate(ro, cf, rocksdb::Slice(obj_id), &raw);
+  if (s.ok()) {
+    if (!DeserializeMetadata(raw, &merged)) return rocksdb::Status::Corruption("value metadata is malformed");
+  } else if (!s.IsNotFound()) {
+    return s;
+  }
+  for (const auto& [k, v] : extra) merged[k] = v;
+  if (merged.size() > kMetaMaxPairs) return rocksdb::Status::InvalidArgument("merged metadata has too many pairs");
+  return txn->Put(cf, rocksdb::Slice(obj_id), rocksdb::Slice(SerializeMetadata(merged)));
+}
+
+inline void AppendF32(std::string* out, float f) {
+  uint32_t u = 0;
+  std::memcpy(&u, &f, 4);
+  AppendU32LE(out, u);
+}
+inline bool ReadF32(std::string_view s, size_t* off, float* f) {
+  uint32_t u = 0;
+  if (!ReadU32LE(s, off, &u)) return false;
+  std::memcpy(f, &u, 4);
+  return true;
+}
+
+// Outcome column family keys:
+//   'o' + u32le(len) + family + u64be(sequence) -> serialized OutcomeRecord (one family's outcomes are contiguous)
+//   'f' + family                                -> u64le count of outcomes (family registry)
+//   'n'                                         -> u64le last sequence number allocated
+constexpr char kOutRecord = 'o';
+constexpr char kOutFamily = 'f';
+constexpr char kOutSeq = 'n';
+constexpr size_t kOutMaxFamily = 512;
+constexpr size_t kOutMaxField = 4096;
+constexpr uint8_t kOutVersion = 1;
+
+inline std::string OutFamilyPrefix(std::string_view family) {
+  std::string k(1, kOutRecord);
+  AppendStr(&k, family);
+  return k;
+}
+inline std::string OutRecordKey(std::string_view family, uint64_t seq) { return OutFamilyPrefix(family) + EncodeU64BE(seq); }
+inline std::string OutFamilyCountKey(std::string_view family) { std::string k(1, kOutFamily); k.append(family); return k; }
+inline std::string OutSeqKey() { return std::string(1, kOutSeq); }
+
+std::string SerializeOutcomeRecord(const prestige::OutcomeRecord& r) {
+  std::string out;
+  out.push_back(static_cast<char>(kOutVersion));
+  out.append(prestige::internal::EncodeU64LE(r.sequence));
+  out.append(prestige::internal::EncodeU64LE(r.recorded_at_us));
+  out.push_back(static_cast<char>(r.outcome.verdict));
+  AppendU32LE(&out, r.outcome.rank);
+  AppendF32(&out, r.outcome.similarity);
+  AppendF32(&out, r.outcome.reranker_score);
+  AppendF32(&out, r.outcome.threshold);
+  AppendStr(&out, r.outcome.family_id);
+  AppendStr(&out, r.outcome.tool_version);
+  AppendStr(&out, r.outcome.schema_version);
+  AppendStr(&out, r.outcome.candidate_object_id);
+  AppendStr(&out, r.outcome.candidate_digest);
+  AppendStr(&out, r.outcome.reason);
+  return out;
+}
+
+bool DeserializeOutcomeRecord(std::string_view s, prestige::OutcomeRecord* r) {
+  if (s.size() < 18 || static_cast<uint8_t>(s[0]) != kOutVersion) return false;
+  size_t off = 1;
+  if (!prestige::internal::DecodeU64LE(s.substr(off, 8), &r->sequence)) return false;
+  off += 8;
+  if (!prestige::internal::DecodeU64LE(s.substr(off, 8), &r->recorded_at_us)) return false;
+  off += 8;
+  const uint8_t v = static_cast<uint8_t>(s[off++]);
+  if (v < 1 || v > 3) return false;
+  r->outcome.verdict = static_cast<prestige::OutcomeVerdict>(v);
+  if (!ReadU32LE(s, &off, &r->outcome.rank)) return false;
+  if (!ReadF32(s, &off, &r->outcome.similarity)) return false;
+  if (!ReadF32(s, &off, &r->outcome.reranker_score)) return false;
+  if (!ReadF32(s, &off, &r->outcome.threshold)) return false;
+  if (!ReadStr(s, &off, &r->outcome.family_id)) return false;
+  if (!ReadStr(s, &off, &r->outcome.tool_version)) return false;
+  if (!ReadStr(s, &off, &r->outcome.schema_version)) return false;
+  if (!ReadStr(s, &off, &r->outcome.candidate_object_id)) return false;
+  if (!ReadStr(s, &off, &r->outcome.candidate_digest)) return false;
+  if (!ReadStr(s, &off, &r->outcome.reason)) return false;
+  return off == s.size();
+}
+
 }  // namespace
 
 // Forward declaration for cache management methods
@@ -292,6 +428,7 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
                                                         rocksdb::ColumnFamilyHandle* refcount_cf,
                                                         rocksdb::ColumnFamilyHandle* meta_cf,
                                                         rocksdb::ColumnFamilyHandle* lru_cf,
+                                                        rocksdb::ColumnFamilyHandle* value_meta_cf,
                                                         std::atomic<uint64_t>* total_store_bytes,
                                                         const std::string& obj_id);
 
@@ -360,6 +497,8 @@ rocksdb::Status Store::Open(const std::string& db_path,
   cfs.emplace_back(kObjectMetaCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kLRUIndexCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
   cfs.emplace_back(kDecisionsCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
+  cfs.emplace_back(kValueMetaCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
+  cfs.emplace_back(kOutcomesCF, MakeCFOptions(cache, opt.bloom_bits_per_key));
 
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Add embeddings and vector pending CFs for semantic mode
@@ -389,6 +528,8 @@ rocksdb::Status Store::Open(const std::string& db_path,
   store->meta_cf_    = store->handles_[5];
   store->lru_cf_     = store->handles_[6];
   store->decisions_cf_ = store->handles_[7];
+  store->value_meta_cf_ = store->handles_[8];
+  store->outcomes_cf_ = store->handles_[9];
 
   // Continue decision sequence numbers after the highest one on disk
   {
@@ -405,8 +546,8 @@ rocksdb::Status Store::Open(const std::string& db_path,
 #ifdef PRESTIGE_ENABLE_SEMANTIC
   // Initialize semantic dedup components
   if (opt.dedup_mode == DedupMode::kSemantic) {
-    store->embeddings_cf_ = store->handles_[8];
-    store->vector_pending_cf_ = store->handles_[9];
+    store->embeddings_cf_ = store->handles_[10];
+    store->vector_pending_cf_ = store->handles_[11];
 
     // Convert device option (used for both embedder and reranker)
     internal::InferenceDevice device_type = internal::InferenceDevice::kAuto;
@@ -957,7 +1098,7 @@ rocksdb::Status Store::Sweep(uint64_t* deleted_count) {
     if (!txn) continue;
 
     rocksdb::Status s = DeleteObjectIfUnreferencedLocked(
-        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_, value_meta_cf_,
         &total_store_bytes_, obj_id);
 
     if (s.ok()) {
@@ -1039,7 +1180,7 @@ rocksdb::Status Store::Prune(uint64_t max_age_seconds,
     if (!txn) continue;
 
     rocksdb::Status s = DeleteObjectIfUnreferencedLocked(
-        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_, value_meta_cf_,
         &total_store_bytes_, obj_id);
 
     if (s.ok()) {
@@ -1100,7 +1241,7 @@ rocksdb::Status Store::EvictLRU(uint64_t target_bytes, uint64_t* evicted_count) 
     if (!txn) continue;
 
     rocksdb::Status s = DeleteObjectIfUnreferencedLocked(
-        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+        txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_, value_meta_cf_,
         &total_store_bytes_, obj_id);
 
     if (s.ok()) {
@@ -1497,6 +1638,364 @@ rocksdb::Status Store::SweepDecisions(uint64_t max_records, DecisionSweepStats* 
   return rocksdb::Status::OK();
 }
 
+// ---------------------------------------------------------------------------
+// Value metadata, candidates and outcomes
+// ---------------------------------------------------------------------------
+
+rocksdb::Status Store::Put(std::string_view user_key, std::string_view value_bytes, const Metadata& metadata) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  rocksdb::Status v = ValidateMetadata(metadata);
+  if (!v.ok()) return v;
+  return PutImpl(user_key, value_bytes, nullptr, &metadata);
+}
+
+rocksdb::Status Store::PutWithDecision(std::string_view user_key,
+                                       std::string_view value_bytes,
+                                       const Decision& decision,
+                                       const Metadata& metadata) {
+  rocksdb::Status v = ValidateMetadata(metadata);
+  if (!v.ok()) return v;
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (decision.decision_id.empty()) return rocksdb::Status::InvalidArgument("decision_id is required");
+  if (decision.decision_id.size() > kDecMaxField) return rocksdb::Status::InvalidArgument("decision_id is too long");
+  if (decision.policy_revision.empty()) return rocksdb::Status::InvalidArgument("policy_revision is required");
+  if (decision.policy_revision.size() > kDecMaxField) return rocksdb::Status::InvalidArgument("policy_revision is too long");
+  if (decision.parent_decision_id.size() > kDecMaxField) return rocksdb::Status::InvalidArgument("parent_decision_id is too long");
+  if (decision.note.size() > kDecMaxNote) return rocksdb::Status::InvalidArgument("note is too long");
+  if (decision.input_digests.size() > kDecMaxInputs) return rocksdb::Status::InvalidArgument("too many input digests");
+  for (const auto& d : decision.input_digests) {
+    if (d.size() != 32) {
+      return rocksdb::Status::InvalidArgument("input digests must be 32-byte SHA-256 digests (see Store::Digest)");
+    }
+  }
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  if (opt_.dedup_mode == DedupMode::kSemantic) {
+    return rocksdb::Status::InvalidArgument("decision records are not supported in semantic mode");
+  }
+#endif
+  return PutImpl(user_key, value_bytes, &decision, &metadata);
+}
+
+rocksdb::Status Store::GetMetadata(std::string_view user_key, Metadata* out) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  out->clear();
+  rocksdb::ReadOptions ro;
+  std::string obj_id;
+  rocksdb::Status s = db_->Get(ro, user_kv_cf_, rocksdb::Slice(user_key.data(), user_key.size()), &obj_id);
+  if (!s.ok()) return s;
+  std::string raw;
+  s = db_->Get(ro, value_meta_cf_, rocksdb::Slice(obj_id), &raw);
+  if (s.IsNotFound()) return rocksdb::Status::OK();
+  if (!s.ok()) return s;
+  if (!DeserializeMetadata(raw, out)) return rocksdb::Status::Corruption("value metadata is malformed");
+  return rocksdb::Status::OK();
+}
+
+bool Store::FillCandidate(Candidate* c, const rocksdb::ReadOptions& ro, const CandidateQuery& query) const {
+  // Every live object has a refcount row in both modes; ObjectMeta exists in exact mode and may be absent in
+  // semantic mode, so it only enriches the candidate.
+  std::string refcount_raw;
+  if (!db_->Get(ro, refcount_cf_, rocksdb::Slice(c->object_id), &refcount_raw).ok()) return false;  // object is gone
+  std::string meta_raw;
+  if (db_->Get(ro, meta_cf_, rocksdb::Slice(c->object_id), &meta_raw).ok()) {
+    prestige::internal::ObjectMeta meta;
+    if (prestige::internal::ObjectMeta::Deserialize(meta_raw, &meta)) {
+      if (c->digest.empty()) c->digest = meta.digest_key;
+      c->size_bytes = meta.size_bytes;
+      c->created_at_us = meta.IsLegacy() ? 0 : meta.created_at_us;
+    }
+  }
+  std::string md_raw;
+  if (db_->Get(ro, value_meta_cf_, rocksdb::Slice(c->object_id), &md_raw).ok()) {
+    DeserializeMetadata(md_raw, &c->metadata);
+  }
+  for (const auto& [k, v] : query.filter) {
+    auto it = c->metadata.find(k);
+    if (it == c->metadata.end() || it->second != v) return false;
+  }
+  if (query.include_values) {
+    if (!db_->Get(ro, objects_cf_, rocksdb::Slice(c->object_id), &c->value).ok()) return false;
+    if (c->size_bytes == 0) c->size_bytes = c->value.size();
+  }
+  return true;
+}
+
+rocksdb::Status Store::Candidates(std::string_view value_bytes,
+                                  const CandidateQuery& query,
+                                  std::vector<Candidate>* out) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  out->clear();
+  EmitCounter(opt_, "prestige.candidates.calls", 1);
+  const size_t k = query.k == 0 ? 10 : query.k;
+  const uint64_t start_us = prestige::internal::NowMicros();
+
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+  if (opt_.dedup_mode == DedupMode::kSemantic) {
+    rocksdb::Status s = CandidatesSemantic(value_bytes, query, k, out);
+    EmitHistogram(opt_, "prestige.candidates.latency_us", prestige::internal::NowMicros() - start_us);
+    EmitHistogram(opt_, "prestige.candidates.returned", static_cast<uint64_t>(out->size()));
+    return s;
+  }
+#endif
+
+  // Exact mode: the identical value is either stored or it is not.
+  const std::string digest = ComputeDigestKey(value_bytes);
+  rocksdb::ReadOptions ro;
+  std::string obj_id;
+  rocksdb::Status s = db_->Get(ro, dedup_cf_, rocksdb::Slice(digest), &obj_id);
+  if (s.IsNotFound()) {
+    EmitHistogram(opt_, "prestige.candidates.returned", 0);
+    return rocksdb::Status::OK();
+  }
+  if (!s.ok()) return s;
+  Candidate c;
+  c.rank = 0;
+  c.similarity = 1.0f;
+  c.object_id = obj_id;
+  c.digest = digest;
+  if (query.min_similarity <= 1.0f && FillCandidate(&c, ro, query)) out->push_back(std::move(c));
+  EmitHistogram(opt_, "prestige.candidates.latency_us", prestige::internal::NowMicros() - start_us);
+  EmitHistogram(opt_, "prestige.candidates.returned", static_cast<uint64_t>(out->size()));
+  return rocksdb::Status::OK();
+}
+
+#ifdef PRESTIGE_ENABLE_SEMANTIC
+rocksdb::Status Store::CandidatesSemantic(std::string_view value_bytes,
+                                          const CandidateQuery& query,
+                                          size_t k,
+                                          std::vector<Candidate>* out) const {
+  std::string_view text = value_bytes;
+  if (text.size() > opt_.semantic_max_text_bytes) text = text.substr(0, opt_.semantic_max_text_bytes);
+  auto embed_result = embedder_->Embed(text);
+  if (!embed_result.success) {
+    return rocksdb::Status::Corruption("Embedding failed: " + embed_result.error_message);
+  }
+  const std::vector<float>& embedding = embed_result.embedding;
+  const size_t dim = embedding.size();
+
+  // Ask the index for more than k so that filtering and deleted entries still leave k candidates.
+  size_t search_k = std::max<size_t>(k, static_cast<size_t>(opt_.semantic_search_k));
+  if (opt_.semantic_reranker_enabled) {
+    search_k = std::max<size_t>(search_k, static_cast<size_t>(opt_.semantic_reranker_top_k));
+  }
+  if (!query.filter.empty()) search_k = std::max<size_t>(search_k, k * 4);
+  auto neighbours = vector_index_->Search(embedding, search_k);
+
+  rocksdb::ReadOptions ro;
+  std::vector<Candidate> scored;
+  scored.reserve(neighbours.size());
+  for (const auto& n : neighbours) {
+    std::string stored_bytes;
+    if (!db_->Get(ro, embeddings_cf_, rocksdb::Slice(n.object_id), &stored_bytes).ok()) continue;
+    if (stored_bytes.size() != dim * sizeof(float)) continue;
+    const float* stored = reinterpret_cast<const float*>(stored_bytes.data());
+    float cos = 0.0f;
+    for (size_t i = 0; i < dim; ++i) cos += embedding[i] * stored[i];
+    if (query.min_similarity >= 0.0f && cos < query.min_similarity) continue;
+    Candidate c;
+    c.similarity = cos;
+    c.object_id = n.object_id;
+    if (!FillCandidate(&c, ro, query)) continue;
+    scored.push_back(std::move(c));
+  }
+  std::sort(scored.begin(), scored.end(),
+            [](const Candidate& a, const Candidate& b) { return a.similarity > b.similarity; });
+  if (scored.size() > k) scored.resize(k);
+
+  if (opt_.semantic_reranker_enabled && reranker_) {
+    for (auto& c : scored) {
+      std::string candidate_text;
+      if (!db_->Get(ro, objects_cf_, rocksdb::Slice(c.object_id), &candidate_text).ok()) continue;
+      auto r = reranker_->Score(value_bytes, candidate_text);
+      if (r.success) c.reranker_score = r.score;
+    }
+  }
+  for (size_t i = 0; i < scored.size(); ++i) scored[i].rank = i;
+  *out = std::move(scored);
+  return rocksdb::Status::OK();
+}
+#endif
+
+rocksdb::Status Store::RecordOutcome(const Outcome& o, uint64_t* sequence_out) {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (o.family_id.empty()) return rocksdb::Status::InvalidArgument("family_id is required");
+  if (o.family_id.size() > kOutMaxFamily) return rocksdb::Status::InvalidArgument("family_id is too long");
+  const uint8_t v = static_cast<uint8_t>(o.verdict);
+  if (v < 1 || v > 3) return rocksdb::Status::InvalidArgument("verdict is not valid");
+  if (o.tool_version.size() > kOutMaxField || o.schema_version.size() > kOutMaxField || o.reason.size() > kOutMaxField) {
+    return rocksdb::Status::InvalidArgument("outcome field is too long");
+  }
+  if (!o.candidate_object_id.empty() && o.candidate_object_id.size() != 16) {
+    return rocksdb::Status::InvalidArgument("candidate_object_id must be the 16-byte object id");
+  }
+  if (!o.candidate_digest.empty() && o.candidate_digest.size() != 32) {
+    return rocksdb::Status::InvalidArgument("candidate_digest must be a 32-byte digest");
+  }
+
+  rocksdb::WriteOptions wo;
+  rocksdb::TransactionOptions to;
+  to.lock_timeout = opt_.lock_timeout_ms;
+  for (int attempt = 0; attempt < opt_.max_retries; ++attempt) {
+    std::unique_ptr<rocksdb::Transaction> txn(db_->BeginTransaction(wo, to));
+    if (!txn) return rocksdb::Status::IOError("BeginTransaction returned null");
+    rocksdb::ReadOptions ro;
+
+    // Allocate the next sequence number under lock so outcomes are totally ordered.
+    std::string raw;
+    uint64_t seq = 0;
+    rocksdb::Status s = txn->GetForUpdate(ro, outcomes_cf_, rocksdb::Slice(OutSeqKey()), &raw);
+    if (s.ok()) {
+      if (!prestige::internal::DecodeU64LE(raw, &seq)) return rocksdb::Status::Corruption("outcome sequence is malformed");
+    } else if (!s.IsNotFound()) {
+      if (prestige::internal::IsRetryableTxnStatus(s)) { BackoffBeforeRetry(opt_, attempt, nullptr); continue; }
+      return s;
+    }
+    seq += 1;
+    s = txn->Put(outcomes_cf_, rocksdb::Slice(OutSeqKey()), rocksdb::Slice(prestige::internal::EncodeU64LE(seq)));
+    if (!s.ok()) return s;
+
+    OutcomeRecord rec;
+    rec.outcome = o;
+    rec.sequence = seq;
+    rec.recorded_at_us = GetWallClockMicros();
+    s = txn->Put(outcomes_cf_, rocksdb::Slice(OutRecordKey(o.family_id, seq)),
+                 rocksdb::Slice(SerializeOutcomeRecord(rec)));
+    if (!s.ok()) return s;
+
+    // Family registry: count of outcomes
+    std::string count_raw;
+    uint64_t count = 0;
+    const std::string count_key = OutFamilyCountKey(o.family_id);
+    s = txn->GetForUpdate(ro, outcomes_cf_, rocksdb::Slice(count_key), &count_raw);
+    if (s.ok()) {
+      prestige::internal::DecodeU64LE(count_raw, &count);
+    } else if (!s.IsNotFound()) {
+      if (prestige::internal::IsRetryableTxnStatus(s)) { BackoffBeforeRetry(opt_, attempt, nullptr); continue; }
+      return s;
+    }
+    s = txn->Put(outcomes_cf_, rocksdb::Slice(count_key), rocksdb::Slice(prestige::internal::EncodeU64LE(count + 1)));
+    if (!s.ok()) return s;
+
+    s = txn->Commit();
+    if (s.ok()) {
+      if (sequence_out) *sequence_out = seq;
+      EmitCounter(opt_, "prestige.outcome.recorded_total", 1);
+      if (o.verdict == OutcomeVerdict::kRejected) {
+        EmitCounter(opt_, "prestige.outcome.false_accept_total", 1);
+      } else if (o.verdict == OutcomeVerdict::kAccepted) {
+        EmitCounter(opt_, "prestige.outcome.accepted_total", 1);
+      } else {
+        EmitCounter(opt_, "prestige.outcome.no_candidate_total", 1);
+      }
+      return s;
+    }
+    if (!prestige::internal::IsRetryableTxnStatus(s)) return s;
+    BackoffBeforeRetry(opt_, attempt, nullptr);
+  }
+  return rocksdb::Status::TimedOut("RecordOutcome exceeded max_retries");
+}
+
+rocksdb::Status Store::ListOutcomes(std::string_view family_id,
+                                    std::vector<OutcomeRecord>* out,
+                                    uint64_t limit,
+                                    uint64_t after_sequence) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  out->clear();
+  const std::string prefix = OutFamilyPrefix(family_id);
+  rocksdb::ReadOptions ro;
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, outcomes_cf_));
+  for (it->Seek(rocksdb::Slice(prefix + EncodeU64BE(after_sequence + 1)));
+       it->Valid() && it->key().size() == prefix.size() + 8 && it->key().starts_with(rocksdb::Slice(prefix));
+       it->Next()) {
+    OutcomeRecord rec;
+    if (!DeserializeOutcomeRecord(std::string_view(it->value().data(), it->value().size()), &rec)) continue;
+    out->push_back(std::move(rec));
+    if (limit > 0 && out->size() >= limit) break;
+  }
+  return it->status();
+}
+
+rocksdb::Status Store::GetFamilyReport(std::string_view family_id, FamilyReport* out) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  *out = FamilyReport{};
+  out->family_id.assign(family_id.data(), family_id.size());
+  out->accepted_similarity_hist.assign(20, 0);
+  out->rejected_similarity_hist.assign(20, 0);
+  out->rejected_rank_hist.assign(16, 0);
+
+  const std::string prefix = OutFamilyPrefix(family_id);
+  rocksdb::ReadOptions ro;
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, outcomes_cf_));
+  bool any = false;
+  for (it->Seek(rocksdb::Slice(prefix));
+       it->Valid() && it->key().size() == prefix.size() + 8 && it->key().starts_with(rocksdb::Slice(prefix));
+       it->Next()) {
+    OutcomeRecord rec;
+    if (!DeserializeOutcomeRecord(std::string_view(it->value().data(), it->value().size()), &rec)) continue;
+    if (!any) {
+      out->first_sequence = rec.sequence;
+      any = true;
+    }
+    out->last_sequence = rec.sequence;
+    out->last_recorded_at_us = rec.recorded_at_us;
+    const float sim = rec.outcome.similarity;
+    const int bucket = sim < 0.0f ? -1 : std::min(19, std::max(0, static_cast<int>(sim * 20.0f)));
+    switch (rec.outcome.verdict) {
+      case OutcomeVerdict::kAccepted:
+        out->accepted++;
+        if (bucket >= 0) out->accepted_similarity_hist[static_cast<size_t>(bucket)]++;
+        break;
+      case OutcomeVerdict::kRejected:
+        out->rejected++;
+        if (bucket >= 0) out->rejected_similarity_hist[static_cast<size_t>(bucket)]++;
+        out->rejected_rank_hist[std::min<size_t>(rec.outcome.rank, 15)]++;
+        break;
+      case OutcomeVerdict::kNoCandidate:
+        out->no_candidate++;
+        break;
+    }
+  }
+  if (!it->status().ok()) return it->status();
+  if (!any) return rocksdb::Status::NotFound("no outcomes recorded for family");
+
+  const uint64_t judged = out->accepted + out->rejected;
+  out->false_accept_rate = judged ? static_cast<double>(out->rejected) / static_cast<double>(judged) : 0.0;
+
+  // Advisory threshold: the lowest bucket edge above which false accepts are at most 5% of judged candidates,
+  // with at least 20 judged candidates above it. Only offered when there is something to calibrate against.
+  if (out->rejected > 0) {
+    uint64_t acc = 0, rej = 0;
+    float suggestion = -1.0f;
+    for (int b = 19; b >= 0; --b) {
+      acc += out->accepted_similarity_hist[static_cast<size_t>(b)];
+      rej += out->rejected_similarity_hist[static_cast<size_t>(b)];
+      const uint64_t n = acc + rej;
+      if (n >= 20 && static_cast<double>(rej) / static_cast<double>(n) <= 0.05) {
+        suggestion = static_cast<float>(b) / 20.0f;
+      }
+    }
+    out->suggested_threshold = suggestion;
+  }
+  return rocksdb::Status::OK();
+}
+
+rocksdb::Status Store::ListFamilies(std::vector<std::string>* out) const {
+  if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
+  if (!out) return rocksdb::Status::InvalidArgument("out is null");
+  out->clear();
+  rocksdb::ReadOptions ro;
+  std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(ro, outcomes_cf_));
+  const char prefix = kOutFamily;
+  for (it->Seek(rocksdb::Slice(&prefix, 1)); it->Valid() && it->key().size() > 0 && it->key()[0] == prefix; it->Next()) {
+    out->emplace_back(it->key().data() + 1, it->key().size() - 1);
+  }
+  return it->status();
+}
+
 rocksdb::Status Store::Flush() {
   if (!db_) return rocksdb::Status::InvalidArgument("db is closed");
 
@@ -1613,6 +2112,7 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
                                                         rocksdb::ColumnFamilyHandle* refcount_cf,
                                                         rocksdb::ColumnFamilyHandle* meta_cf,
                                                         rocksdb::ColumnFamilyHandle* lru_cf,
+                                                        rocksdb::ColumnFamilyHandle* value_meta_cf,
                                                         std::atomic<uint64_t>* total_store_bytes,
                                                         const std::string& obj_id) {
   if (!txn) return rocksdb::Status::InvalidArgument("txn is null");
@@ -1654,7 +2154,8 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
     (void)txn->Delete(lru_cf, rocksdb::Slice(lru_key));
   }
 
-  // Remove object bytes + meta + refcount
+  // Remove caller metadata, object bytes, meta and refcount
+  if (value_meta_cf) (void)txn->Delete(value_meta_cf, rocksdb::Slice(obj_id));
   s = txn->Delete(objects_cf, rocksdb::Slice(obj_id));
   if (!s.ok()) return s;
 
@@ -1678,7 +2179,7 @@ static rocksdb::Status DeleteObjectIfUnreferencedLocked(rocksdb::Transaction* tx
 }
 
 rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value_bytes,
-                               const Decision* decision) {
+                               const Decision* decision, const Metadata* metadata) {
   EmitCounter(opt_, "prestige.put.calls", 1);
   EmitHistogram(opt_, "prestige.put.value_bytes", static_cast<uint64_t>(value_bytes.size()));
 
@@ -1694,7 +2195,7 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
     if (decision) {
       return rocksdb::Status::InvalidArgument("decision records are not supported in semantic mode");
     }
-    return PutImplSemantic(user_key, value_bytes, span.get(), op_start_us);
+    return PutImplSemantic(user_key, value_bytes, span.get(), op_start_us, metadata);
   }
 #endif
 
@@ -1853,6 +2354,12 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
         if (!s.ok()) return finish(s);
         ++batch_writes;
 
+        if (metadata && !metadata->empty()) {
+          s = txn->Put(value_meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(SerializeMetadata(*metadata)));
+          if (!s.ok()) return finish(s);
+          ++batch_writes;
+        }
+
         // Update total store size
         total_store_bytes_.fetch_add(value_bytes.size());
 
@@ -1870,12 +2377,28 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
       } else {
         EmitCounter(opt_, "prestige.put.dedup_hit_total", 1);
         dedup_hit_final = true;
+        if (metadata && !metadata->empty()) {
+          rocksdb::Status ms = MergeMetadataLocked(txn.get(), value_meta_cf_, obj_id, *metadata);
+          if (!ms.ok()) {
+            if (prestige::internal::IsRetryableTxnStatus(ms)) {
+              EmitCounter(opt_, "prestige.put.retry_total", 1);
+              SpanEvent(span.get(), "retry.metadata_lock");
+              BackoffBeforeRetry(opt_, attempt, span.get());
+              total_wait_us += prestige::internal::NowMicros() - attempt_start_us;
+              attempt_start_us = prestige::internal::NowMicros();
+              continue;
+            }
+            return finish(ms);
+          }
+          ++batch_writes;
+        }
       }
     }
 
     had_old_final = had_old;
 
     const bool same_object = had_old && old_obj_id == obj_id;
+    const bool metadata_only = metadata && !metadata->empty();
 
     // Decision record: lock it first so a replayed decision is recognized and a reused id is refused.
     if (decision) {
@@ -1908,8 +2431,8 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
       }
     }
 
-    // If overwrite maps to same object_id and there is no decision to record, nothing to do
-    if (same_object && !decision) {
+    // If overwrite maps to same object_id and there is nothing else to record, nothing to do
+    if (same_object && !decision && !metadata_only) {
       noop_overwrite = true;
       EmitCounter(opt_, "prestige.put.noop_overwrite_total", 1);
       txn->Rollback();
@@ -1945,7 +2468,7 @@ rocksdb::Status Store::PutImpl(std::string_view user_key, std::string_view value
 
       if (opt_.enable_gc && old_cnt == 0) {
         s = DeleteObjectIfUnreferencedLocked(
-            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_, value_meta_cf_,
             &total_store_bytes_, old_obj_id);
         if (!s.ok()) return finish(s);
         batch_writes += 5;  // delete from objects, dedup, refcount, meta, lru
@@ -2096,13 +2619,13 @@ rocksdb::Status Store::DeleteImpl(std::string_view user_key) {
         gc_obj_id = obj_id;
       } else {
         s = DeleteObjectIfUnreferencedLocked(
-            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+            txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_, value_meta_cf_,
             &total_store_bytes_, obj_id);
         batch_writes += 5;  // objects, dedup, refcount, meta, lru deletes
       }
 #else
       s = DeleteObjectIfUnreferencedLocked(
-          txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_,
+          txn.get(), objects_cf_, dedup_cf_, refcount_cf_, meta_cf_, lru_cf_, value_meta_cf_,
           &total_store_bytes_, obj_id);
       batch_writes += 5;  // objects, dedup, refcount, meta, lru deletes
 #endif
@@ -2263,7 +2786,8 @@ rocksdb::Status Store::DeleteSemanticObject(rocksdb::Transaction* txn,
 rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
                                         std::string_view value_bytes,
                                         TraceSpan* span,
-                                        uint64_t op_start_us) {
+                                        uint64_t op_start_us,
+                                        const Metadata* metadata) {
   // Compute embedding for the value
   const uint64_t embed_start_us = prestige::internal::NowMicros();
 
@@ -2635,6 +3159,18 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
       if (s.ok()) {
         // Object still exists - safe to reuse
         obj_id = matched_obj_id;
+        if (metadata && !metadata->empty()) {
+          rocksdb::Status ms = MergeMetadataLocked(txn.get(), value_meta_cf_, obj_id, *metadata);
+          if (!ms.ok()) {
+            if (prestige::internal::IsRetryableTxnStatus(ms)) {
+              EmitCounter(opt_, "prestige.put.retry_total", 1);
+              SpanEvent(span, "retry.metadata_lock");
+              BackoffBeforeRetry(opt_, attempt, span);
+              continue;
+            }
+            return finish(ms);
+          }
+        }
       } else if (s.IsNotFound()) {
         // Matched object was GC'd - store value in a new object instead
         EmitCounter(opt_, "prestige.semantic.stale_match_total", 1);
@@ -2674,6 +3210,11 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
                    rocksdb::Slice(embedding_bytes));
       if (!s.ok()) return finish(s);
 
+      if (metadata && !metadata->empty()) {
+        s = txn->Put(value_meta_cf_, rocksdb::Slice(obj_id), rocksdb::Slice(SerializeMetadata(*metadata)));
+        if (!s.ok()) return finish(s);
+      }
+
       // Initialize refcount to 0 (will be incremented below)
       s = txn->Put(refcount_cf_, rocksdb::Slice(obj_id),
                    rocksdb::Slice(prestige::internal::EncodeU64LE(0)));
@@ -2690,10 +3231,20 @@ rocksdb::Status Store::PutImplSemantic(std::string_view user_key,
 
     had_old_final = had_old;
 
-    // If overwrite maps to same object_id, nothing to do
+    // If overwrite maps to same object_id, only metadata (already merged above) may need committing
     if (had_old && old_obj_id == obj_id) {
       noop_overwrite = true;
       EmitCounter(opt_, "prestige.put.noop_overwrite_total", 1);
+      if (metadata && !metadata->empty()) {
+        rocksdb::Status cs = txn->Commit();
+        if (cs.ok()) return finish(cs);
+        if (prestige::internal::IsRetryableTxnStatus(cs)) {
+          EmitCounter(opt_, "prestige.put.retry_total", 1);
+          BackoffBeforeRetry(opt_, attempt, span);
+          continue;
+        }
+        return finish(cs);
+      }
       txn->Rollback();
       return finish(rocksdb::Status::OK());
     }

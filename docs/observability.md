@@ -70,6 +70,12 @@ Call `EmitCacheMetrics()` periodically (e.g., every few seconds) to emit:
 
 ---
 
+### Candidates and Outcomes
+- **Counters**: `prestige.candidates.calls`, `prestige.outcome.recorded_total`, `prestige.outcome.accepted_total`,
+  `prestige.outcome.false_accept_total`, `prestige.outcome.no_candidate_total`
+- **Histograms**: `prestige.candidates.returned`, `prestige.candidates.latency_us`
+- **Put span event**: `retry.metadata_lock`
+
 ### Decision Records
 - **Counters**: `prestige.decision.recorded_total`, `prestige.decision.replayed_total`, `prestige.decision.get_total`,
   `prestige.decision.dangling_read_total`, `prestige.decision.sweep_checked_total`, `prestige.decision.sweep_checkpoint_total`,

@@ -10,7 +10,7 @@
     "import": "prestige",
     "source": "git clone https://github.com/demajh/prestige.git && cd prestige/python && pip install ."
   },
-  "capabilities": ["exact-dedup", "semantic-dedup", "text-normalization", "ttl", "lru-eviction", "health-stats", "decision-records", "http-server", "ml-dataloaders"],
+  "capabilities": ["exact-dedup", "semantic-dedup", "text-normalization", "ttl", "lru-eviction", "health-stats", "decision-records", "candidates", "value-metadata", "outcome-reports", "http-server", "ml-dataloaders"],
   "runtime": {"network": false, "account": false, "storage": "local directory (RocksDB)"},
   "docs": {
     "python": "https://github.com/demajh/prestige/blob/main/docs/python-bindings.md",
@@ -18,6 +18,7 @@
     "semantic": "https://github.com/demajh/prestige/blob/main/docs/semantic-dedup.md",
     "dataloaders": "https://github.com/demajh/prestige/blob/main/docs/dataloaders.md",
     "server": "https://github.com/demajh/prestige/blob/main/docs/server.md",
-    "provenance": "https://github.com/demajh/prestige/blob/main/docs/provenance.md"
+    "provenance": "https://github.com/demajh/prestige/blob/main/docs/provenance.md",
+    "candidates": "https://github.com/demajh/prestige/blob/main/docs/candidates.md"
   }
 }

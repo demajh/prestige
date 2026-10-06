@@ -64,3 +64,4 @@ htmlcov/
 .venv-test/
 dist-wheels/
 wheelhouse/
+build-semantic/

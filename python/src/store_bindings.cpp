@@ -59,6 +59,59 @@ py::list DigestsToPy(const std::vector<std::string>& digests) {
   return out;
 }
 
+Metadata MetadataFromPy(const py::object& obj) {
+  Metadata m;
+  if (obj.is_none()) return m;
+  for (const auto& item : obj.cast<py::dict>()) {
+    m[item.first.cast<std::string>()] = item.second.cast<std::string>();
+  }
+  return m;
+}
+
+py::dict MetadataToPy(const Metadata& m) {
+  py::dict d;
+  for (const auto& [k, v] : m) d[py::str(k)] = py::str(v);
+  return d;
+}
+
+py::dict CandidateToDict(const Candidate& c) {
+  py::dict d("rank"_a = c.rank, "similarity"_a = c.similarity, "object_id"_a = py::bytes(c.object_id),
+             "digest"_a = py::bytes(c.digest), "metadata"_a = MetadataToPy(c.metadata), "size_bytes"_a = c.size_bytes,
+             "created_at_us"_a = c.created_at_us);
+  d["reranker_score"] = c.reranker_score < 0.0f ? py::object(py::none()) : py::object(py::float_(c.reranker_score));
+  if (!c.value.empty() || c.size_bytes == 0) d["value"] = py::bytes(c.value);
+  return d;
+}
+
+OutcomeVerdict VerdictFromString(const std::string& v) {
+  if (v == "accepted") return OutcomeVerdict::kAccepted;
+  if (v == "rejected") return OutcomeVerdict::kRejected;
+  if (v == "no_candidate") return OutcomeVerdict::kNoCandidate;
+  throw py::value_error("verdict must be 'accepted', 'rejected' or 'no_candidate'");
+}
+
+const char* VerdictToString(OutcomeVerdict v) {
+  switch (v) {
+    case OutcomeVerdict::kAccepted: return "accepted";
+    case OutcomeVerdict::kRejected: return "rejected";
+    case OutcomeVerdict::kNoCandidate: return "no_candidate";
+  }
+  return "unknown";
+}
+
+py::object OptionalScore(float f) { return f < 0.0f ? py::object(py::none()) : py::object(py::float_(f)); }
+
+py::dict OutcomeRecordToDict(const OutcomeRecord& r) {
+  return py::dict("sequence"_a = r.sequence, "recorded_at_us"_a = r.recorded_at_us, "family_id"_a = r.outcome.family_id,
+                  "verdict"_a = VerdictToString(r.outcome.verdict), "tool_version"_a = r.outcome.tool_version,
+                  "schema_version"_a = r.outcome.schema_version,
+                  "candidate_object_id"_a = py::bytes(r.outcome.candidate_object_id),
+                  "candidate_digest"_a = py::bytes(r.outcome.candidate_digest), "rank"_a = r.outcome.rank,
+                  "similarity"_a = OptionalScore(r.outcome.similarity),
+                  "reranker_score"_a = OptionalScore(r.outcome.reranker_score),
+                  "threshold"_a = OptionalScore(r.outcome.threshold), "reason"_a = r.outcome.reason);
+}
+
 py::dict RecordToDict(const DecisionRecord& rec) {
   return py::dict("decision_id"_a = rec.decision.decision_id,
                   "policy_revision"_a = rec.decision.policy_revision,
@@ -103,7 +156,8 @@ class PyStore : public std::enable_shared_from_this<PyStore> {
    * Store a key-value pair.
    * Accepts bytes or str for value.
    */
-  void Put(const std::string& key, py::object value, py::object decision = py::none()) {
+  void Put(const std::string& key, py::object value, py::object decision = py::none(),
+           py::object metadata = py::none()) {
     EnsureOpen();
     std::string value_bytes;
 
@@ -115,16 +169,133 @@ class PyStore : public std::enable_shared_from_this<PyStore> {
       throw py::type_error("value must be bytes or str");
     }
 
+    const Metadata md = MetadataFromPy(metadata);
+    const bool has_md = !metadata.is_none();
     rocksdb::Status status;
     if (decision.is_none()) {
       py::gil_scoped_release release;
-      status = store_->Put(key, value_bytes);
+      status = has_md ? store_->Put(key, value_bytes, md) : store_->Put(key, value_bytes);
     } else {
       const Decision d = decision.cast<Decision>();
       py::gil_scoped_release release;
-      status = store_->PutWithDecision(key, value_bytes, d);
+      status = has_md ? store_->PutWithDecision(key, value_bytes, d, md) : store_->PutWithDecision(key, value_bytes, d);
     }
     CheckStatus(status);
+  }
+
+  py::dict GetMetadata(const std::string& key) {
+    EnsureOpen();
+    Metadata m;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->GetMetadata(key, &m);
+    }
+    CheckStatusNotFound(status, key);
+    return MetadataToPy(m);
+  }
+
+  py::list Candidates(py::object value, size_t k, py::object filter, py::object min_similarity, bool include_values) {
+    EnsureOpen();
+    std::string value_bytes;
+    if (py::isinstance<py::bytes>(value) || py::isinstance<py::str>(value)) {
+      value_bytes = value.cast<std::string>();
+    } else {
+      throw py::type_error("value must be bytes or str");
+    }
+    CandidateQuery q;
+    q.k = k;
+    q.filter = MetadataFromPy(filter);
+    q.min_similarity = min_similarity.is_none() ? -1.0f : min_similarity.cast<float>();
+    q.include_values = include_values;
+    std::vector<Candidate> out;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->Candidates(value_bytes, q, &out);
+    }
+    CheckStatus(status);
+    py::list result;
+    for (const auto& c : out) result.append(CandidateToDict(c));
+    return result;
+  }
+
+  uint64_t RecordOutcome(const std::string& family_id, const std::string& verdict, py::object candidate, py::object rank,
+                         py::object similarity, py::object reranker_score, py::object threshold,
+                         const std::string& tool_version, const std::string& schema_version, const std::string& reason) {
+    EnsureOpen();
+    Outcome o;
+    o.family_id = family_id;
+    o.verdict = VerdictFromString(verdict);
+    o.tool_version = tool_version;
+    o.schema_version = schema_version;
+    o.reason = reason;
+    if (!candidate.is_none()) {
+      // A dict from candidates() carries the object id, digest, rank and scores.
+      py::dict c = candidate.cast<py::dict>();
+      if (c.contains("object_id")) o.candidate_object_id = c["object_id"].cast<std::string>();
+      if (c.contains("digest")) o.candidate_digest = c["digest"].cast<std::string>();
+      if (c.contains("rank")) o.rank = c["rank"].cast<uint32_t>();
+      if (c.contains("similarity")) o.similarity = c["similarity"].cast<float>();
+      if (c.contains("reranker_score") && !c["reranker_score"].is_none()) o.reranker_score = c["reranker_score"].cast<float>();
+    }
+    if (!rank.is_none()) o.rank = rank.cast<uint32_t>();
+    if (!similarity.is_none()) o.similarity = similarity.cast<float>();
+    if (!reranker_score.is_none()) o.reranker_score = reranker_score.cast<float>();
+    if (!threshold.is_none()) o.threshold = threshold.cast<float>();
+    uint64_t seq = 0;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->RecordOutcome(o, &seq);
+    }
+    CheckStatus(status);
+    return seq;
+  }
+
+  py::list ListOutcomes(const std::string& family_id, uint64_t limit, uint64_t after_sequence) {
+    EnsureOpen();
+    std::vector<OutcomeRecord> recs;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->ListOutcomes(family_id, &recs, limit, after_sequence);
+    }
+    CheckStatus(status);
+    py::list out;
+    for (const auto& r : recs) out.append(OutcomeRecordToDict(r));
+    return out;
+  }
+
+  py::dict FamilyReport(const std::string& family_id) {
+    EnsureOpen();
+    prestige::FamilyReport r;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->GetFamilyReport(family_id, &r);
+    }
+    CheckStatusNotFound(status, family_id);
+    return py::dict("family_id"_a = r.family_id, "accepted"_a = r.accepted, "rejected"_a = r.rejected,
+                    "no_candidate"_a = r.no_candidate, "false_accept_rate"_a = r.false_accept_rate,
+                    "accepted_similarity_hist"_a = r.accepted_similarity_hist,
+                    "rejected_similarity_hist"_a = r.rejected_similarity_hist,
+                    "rejected_rank_hist"_a = r.rejected_rank_hist,
+                    "suggested_threshold"_a = OptionalScore(r.suggested_threshold),
+                    "first_sequence"_a = r.first_sequence, "last_sequence"_a = r.last_sequence,
+                    "last_recorded_at_us"_a = r.last_recorded_at_us);
+  }
+
+  std::vector<std::string> ListFamilies() {
+    EnsureOpen();
+    std::vector<std::string> out;
+    rocksdb::Status status;
+    {
+      py::gil_scoped_release release;
+      status = store_->ListFamilies(&out);
+    }
+    CheckStatus(status);
+    return out;
   }
 
   /** Read a decision record; the read-time guard runs and the result reports what is missing. */
@@ -556,16 +727,80 @@ void BindStore(py::module_& m) {
 
       // Core KV operations
       .def("put", &PyStore::Put, py::arg("key"), py::arg("value"), py::arg("decision") = py::none(),
+           py::arg("metadata") = py::none(),
            R"doc(Store a key-value pair.
 
         The value is automatically deduplicated by content hash. Pass a Decision to commit a
-        provenance record in the same transaction as the write (exact mode only).
+        provenance record in the same transaction as the write (exact mode only). Pass metadata
+        (a dict of str to str, e.g. task family, tool version, constraint-schema version) to attach
+        it to the stored value; it is returned with every candidate and merged into the value's
+        existing metadata when the same bytes are written again.
 
         Args:
             key: Key string
             value: Value as bytes or str
             decision: Optional Decision recorded atomically with the write
+            metadata: Optional dict of str to str attached to the value
         )doc")
+
+      .def("get_metadata", &PyStore::GetMetadata, py::arg("key"),
+           "Metadata stored with the value behind key (empty dict when none). Raises NotFoundError for unknown keys.")
+
+      .def("candidates", &PyStore::Candidates, py::arg("value"), py::arg("k") = 10, py::arg("filter") = py::none(),
+           py::arg("min_similarity") = py::none(), py::arg("include_values") = false,
+           R"doc(The nearest stored values to `value`, ranked by similarity, with their metadata.
+
+        The store does not decide whether any candidate is a hit; apply your own thresholds and
+        constraint checks to the list. Exact mode returns the identical value at similarity 1.0 or
+        an empty list; semantic mode searches the vector index.
+
+        Args:
+            value: Query value as bytes or str
+            k: Maximum number of candidates
+            filter: Dict of metadata pairs every candidate must carry
+            min_similarity: Drop candidates below this cosine similarity
+            include_values: Also return the stored bytes under "value"
+
+        Returns:
+            List of dicts with rank, similarity, reranker_score (None without a reranker),
+            object_id, digest, metadata, size_bytes, created_at_us and optionally value
+        )doc")
+
+      .def("record_outcome", &PyStore::RecordOutcome, py::arg("family_id"), py::arg("verdict"),
+           py::arg("candidate") = py::none(), py::arg("rank") = py::none(), py::arg("similarity") = py::none(),
+           py::arg("reranker_score") = py::none(), py::arg("threshold") = py::none(), py::arg("tool_version") = "",
+           py::arg("schema_version") = "", py::arg("reason") = "",
+           R"doc(Record what you decided about a candidate, keyed by its task family.
+
+        Args:
+            family_id: Explicit, versioned task-family id, e.g. "support-faq@v3"
+            verdict: "accepted" (reused), "rejected" (above your threshold but failed a
+                constraint check: a false accept) or "no_candidate"
+            candidate: A dict from candidates(); supplies object_id, digest, rank and scores
+            rank, similarity, reranker_score, threshold: Override or supply the numbers directly
+            tool_version, schema_version, reason: Free-form context
+
+        Returns:
+            The outcome's sequence number
+        )doc")
+
+      .def("list_outcomes", &PyStore::ListOutcomes, py::arg("family_id"), py::arg("limit") = 0,
+           py::arg("after_sequence") = 0, "Outcomes of one family in the order recorded.")
+
+      .def("family_report", &PyStore::FamilyReport, py::arg("family_id"),
+           R"doc(False-accept rate and distributions for one family.
+
+        Returns:
+            Dict with accepted, rejected, no_candidate, false_accept_rate, accepted_similarity_hist
+            and rejected_similarity_hist (20 buckets over [0, 1]), rejected_rank_hist (ranks 0..15+),
+            suggested_threshold (advisory, None without enough evidence), first_sequence,
+            last_sequence, last_recorded_at_us
+
+        Raises:
+            NotFoundError: If the family has no outcomes
+        )doc")
+
+      .def("list_families", &PyStore::ListFamilies, "Every family with at least one recorded outcome.")
 
       .def("get_decision", &PyStore::GetDecision, py::arg("decision_id"), py::arg("strict") = false,
            R"doc(Read a decision record and resolve its commitments.
@@ -736,7 +971,7 @@ void BindStore(py::module_& m) {
 
       // Dict-like interface
       .def("__contains__", &PyStore::Contains)
-      .def("__setitem__", [](PyStore& self, const std::string& key, py::object value) { self.Put(key, std::move(value), py::none()); },
+      .def("__setitem__", [](PyStore& self, const std::string& key, py::object value) { self.Put(key, std::move(value), py::none(), py::none()); },
            "Store a key-value pair (dict-style).")
       .def(
           "__getitem__",

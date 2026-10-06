@@ -363,6 +363,7 @@ if(PRESTIGE_BUILD_TESTS)
     tests/judge_test.cpp
     tests/crash_test.cpp
     tests/decision_test.cpp
+    tests/candidates_test.cpp
   )
 
   target_link_libraries(prestige_tests

@@ -42,6 +42,10 @@ curl -s https://raw.githubusercontent.com/demajh/prestige/main/skill.json > ~/.m
   middle step.
 - **Training or evaluation data.** `prestige.dataloaders` deduplicates Hugging Face / PyTorch datasets and measures
   train/test contamination before you fine-tune or benchmark.
+- **A semantic cache that lets you decide.** `store.candidates(value, k, filter={"family": ...})` returns the
+  nearest stored values with similarity, reranker score and metadata instead of certifying a hit; you apply your
+  constraint checks, then `store.record_outcome(family, "accepted" | "rejected" | "no_candidate", candidate=...)`
+  and read `store.family_report(family)` for the false-accept rate and an advisory threshold per task family.
 - **Provenance you can audit.** Pass a `prestige.Decision(decision_id, policy_revision, input_digests=...)` to
   `put` and the record commits in the same transaction as the value. `get_decision` tells you when a referenced
   body is missing, `sweep_decisions` repairs the queue, and `get_health()["decision_queue_size"]` is your integrity

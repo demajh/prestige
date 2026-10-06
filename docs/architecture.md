@@ -34,6 +34,8 @@ Uses neural network embeddings for semantic similarity deduplication:
 | `prestige_refcount` | Reference counting for GC | `object_id` | `uint64_le` |
 | `prestige_object_meta` | Reverse mapping for GC | `object_id` | `sha256(value_bytes)` |
 | `prestige_decisions` | Decision records, write-order index, repair queue, counters ([details](provenance.md)) | one-byte prefix + id or `u64be(sequence)` | serialized record, decision id, or counter |
+| `prestige_value_meta` | Caller metadata per value ([details](candidates.md)) | `object_id` | serialized string map |
+| `prestige_outcomes` | Outcome records per task family, registry, sequence counter ([details](candidates.md)) | `o` + family + `u64be(sequence)`, `f` + family, `n` | serialized outcome, count, counter |
 
 ### Semantic mode (adds/replaces)
 

@@ -31,6 +31,7 @@ The prestige unique value store is a less gruesome, but no less effective way to
 - **Cache semantics** - TTL expiration, LRU eviction, health monitoring
 - **Atomic operations** - RocksDB TransactionDB ensures consistency
 - **Decision records** - commit the decision id, policy revision and input digests behind a write in the same transaction as the value; detect and repair dangling provenance ([docs](docs/provenance.md))
+- **Candidates, not verdicts** - ask for the nearest stored values with their scores and metadata, apply your own constraint checks, and record the outcomes per task family to calibrate thresholds from measured false-accept rates ([docs](docs/candidates.md))
 - **Observability** - pluggable metrics and distributed tracing hooks
 - **Simple API** - familiar `Put`/`Get`/`Delete` interface
 - **HTTP Server** - REST API for standalone deployment with Prometheus metrics
@@ -163,6 +164,7 @@ skill format: `https://raw.githubusercontent.com/demajh/prestige/main/skill.md`.
 | [ML Dataloaders](docs/dataloaders.md) | Deduplicated dataloaders for training |
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
 | [Decision Records](docs/provenance.md) | Provenance committed with the write; read-time guard, repair queue, integrity debt |
+| [Candidates and Outcomes](docs/candidates.md) | Ranked candidates with metadata; outcome records and per-family false-accept reports |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |
 | [Observability](docs/observability.md) | Metrics and tracing |

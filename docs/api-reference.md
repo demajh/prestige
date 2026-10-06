@@ -133,6 +133,40 @@ rocksdb::Status Digest(std::string_view value_bytes, std::string* digest_out) co
 ```
 The 32-byte content key the store computes for a value (normalization-aware), for `Decision::input_digests`.
 
+### Candidates, Metadata and Outcome Methods
+
+See [Candidates, value metadata and outcomes](candidates.md).
+
+```cpp
+rocksdb::Status Put(std::string_view user_key, std::string_view value_bytes, const Metadata& metadata);
+rocksdb::Status PutWithDecision(std::string_view user_key, std::string_view value_bytes,
+                                const Decision& decision, const Metadata& metadata);
+rocksdb::Status GetMetadata(std::string_view user_key, Metadata* out) const;
+```
+Attach a small `std::map<std::string, std::string>` to the stored value. Writing the same bytes again with metadata
+merges the maps (later pairs win per key); a plain `Put` leaves metadata alone. Limits: 64 pairs, 256-byte keys,
+4096-byte values.
+
+```cpp
+rocksdb::Status Candidates(std::string_view value_bytes, const CandidateQuery& query,
+                           std::vector<Candidate>* out) const;
+```
+The nearest stored values, ranked by cosine similarity, each with rank, similarity, reranker score (when a reranker is
+configured), object id, digest, metadata, size and creation time, optionally the bytes. `CandidateQuery` carries `k`,
+a metadata `filter` (every pair must match), `min_similarity` and `include_values`. The store applies no threshold.
+Exact mode returns the identical value at similarity 1.0 or nothing.
+
+```cpp
+rocksdb::Status RecordOutcome(const Outcome& outcome, uint64_t* sequence_out = nullptr);
+rocksdb::Status ListOutcomes(std::string_view family_id, std::vector<OutcomeRecord>* out,
+                             uint64_t limit = 0, uint64_t after_sequence = 0) const;
+rocksdb::Status GetFamilyReport(std::string_view family_id, FamilyReport* out) const;
+rocksdb::Status ListFamilies(std::vector<std::string>* out) const;
+```
+Record what the caller decided about a candidate (`kAccepted`, `kRejected` for a false accept of the similarity gate,
+`kNoCandidate`) under an explicit, versioned task-family id, and read back the per-family false-accept rate, the
+similarity and rank distributions of failures, and an advisory `suggested_threshold`.
+
 ---
 
 ## Options
@@ -298,6 +332,58 @@ struct DecisionSweepStats {
   uint64_t queue_size;       // integrity debt after the sweep
   uint64_t cursor_sequence;  // last sequence the full walk verified
   uint64_t max_sequence;
+};
+```
+
+### Metadata, Candidate, CandidateQuery
+
+```cpp
+using Metadata = std::map<std::string, std::string>;
+
+struct Candidate {
+  size_t rank;              // 0 is the nearest
+  float similarity;         // cosine similarity (exact mode: 1.0)
+  float reranker_score;     // -1 without a reranker
+  std::string object_id, digest;
+  Metadata metadata;
+  uint64_t size_bytes, created_at_us;
+  std::string value;        // only with CandidateQuery::include_values
+};
+
+struct CandidateQuery {
+  size_t k = 10;
+  Metadata filter;
+  float min_similarity = -1.0f;
+  bool include_values = false;
+};
+```
+
+### Outcome, OutcomeRecord, FamilyReport
+
+```cpp
+enum class OutcomeVerdict : uint8_t { kAccepted = 1, kRejected = 2, kNoCandidate = 3 };
+
+struct Outcome {
+  std::string family_id;                     // required, e.g. "support-faq@v3"
+  OutcomeVerdict verdict;
+  std::string tool_version, schema_version;  // optional
+  std::string candidate_object_id, candidate_digest;
+  uint32_t rank;
+  float similarity, reranker_score, threshold;  // -1 when not recorded
+  std::string reason;
+};
+
+struct OutcomeRecord { Outcome outcome; uint64_t sequence, recorded_at_us; };
+
+struct FamilyReport {
+  std::string family_id;
+  uint64_t accepted, rejected, no_candidate;
+  double false_accept_rate;                        // rejected / (accepted + rejected)
+  std::vector<uint64_t> accepted_similarity_hist;  // 20 buckets over [0, 1]
+  std::vector<uint64_t> rejected_similarity_hist;
+  std::vector<uint64_t> rejected_rank_hist;        // ranks 0..14, then 15+
+  float suggested_threshold;                       // advisory, -1 without enough evidence
+  uint64_t first_sequence, last_sequence, last_recorded_at_us;
 };
 ```
 
