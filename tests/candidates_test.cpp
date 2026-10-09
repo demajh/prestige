@@ -233,6 +233,20 @@ TEST_F(CandidatesTest, SuggestedThresholdNeedsEnoughEvidenceAndIsAdvisory) {
   EXPECT_EQ(r.rejected_rank_hist[2], 10u);
 }
 
+TEST_F(CandidatesTest, SuggestedThresholdNeverFallsBelowTheLowestJudgedBucket) {
+  ASSERT_TRUE(OpenStore().ok());
+  // Every judged candidate sits at or above 0.90, as happens when a family is gated at 0.90 from the start.
+  for (int i = 0; i < 30; ++i) ASSERT_TRUE(store_->RecordOutcome(MakeOutcome("g", OutcomeVerdict::kAccepted, 0.96f)).ok());
+  ASSERT_TRUE(store_->RecordOutcome(MakeOutcome("g", OutcomeVerdict::kRejected, 0.93f, 0)).ok());
+
+  FamilyReport r;
+  ASSERT_TRUE(store_->GetFamilyReport("g", &r).ok());
+  // Above 0.95: 30 of 30 accepted. Above 0.90: 1 rejected of 31 (3.2%), still within 5%, so the edge moves down to
+  // 0.90. Below that nothing was judged, so the cumulative counts would not change and the advice must stop there
+  // instead of sliding to 0.00.
+  EXPECT_FLOAT_EQ(r.suggested_threshold, 0.90f);
+}
+
 TEST_F(CandidatesTest, OutcomeValidation) {
   ASSERT_TRUE(OpenStore().ok());
   EXPECT_TRUE(store_->RecordOutcome(MakeOutcome("", OutcomeVerdict::kAccepted, 0.9f)).IsInvalidArgument());

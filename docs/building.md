@@ -69,6 +69,7 @@ sudo make install
 - `prestige_cli` (CLI tool)
 - `prestige_example_basic` (example program)
 - `prestige_example_observability` (observability example)
+- `prestige_example_outcomes` (outcome records demo, see [outcomes-demo.md](outcomes-demo.md))
 - `prestige_example_semantic` (semantic example, if enabled)
 
 ## CMake Options

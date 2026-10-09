@@ -195,6 +195,12 @@ if(PRESTIGE_BUILD_EXAMPLES)
   add_executable(prestige_example_observability examples/observability.cpp)
   target_link_libraries(prestige_example_observability PRIVATE prestige_uvs)
 
+  # Outcome records demo (docs/outcomes-demo.md); runs in exact mode without semantic dedup
+  add_executable(prestige_example_outcomes examples/outcomes.cpp)
+  target_link_libraries(prestige_example_outcomes PRIVATE prestige_uvs)
+  target_compile_definitions(prestige_example_outcomes PRIVATE
+    PRESTIGE_OUTCOMES_WORKLOAD="${CMAKE_CURRENT_SOURCE_DIR}/examples/outcomes_workload.tsv")
+
   # Semantic example only when semantic dedup is enabled
   if(PRESTIGE_ENABLE_SEMANTIC)
     add_executable(prestige_example_semantic examples/semantic.cpp)

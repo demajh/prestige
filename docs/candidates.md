@@ -13,6 +13,9 @@ This document covers the three pieces that make that possible:
 - **Outcomes** record what the caller decided about a candidate, per task family, so thresholds can be calibrated
   from measured false-accept rates instead of guesswork.
 
+[outcomes-demo.md](outcomes-demo.md) runs this loop end to end over a synthetic workload of three task families and
+shows the per-family reports it produces.
+
 ## Candidates
 
 ```cpp
@@ -104,12 +107,14 @@ store->GetFamilyReport("support-faq@v3", &r);
 
 `suggested_threshold` is **advisory**: it is the lowest similarity bucket edge above which recorded false accepts are
 at most 5% of judged candidates, computed only when at least 20 judged candidates sit above that edge and at least one
-rejection has been recorded. Thresholds are never mutated by the store, and never per pair; the caller reads the report
+rejection has been recorded, and never below the lowest bucket in which a candidate was judged (a family gated at 0.90
+whose judged candidates all sit above the gate is advised 0.90, not 0.00). Thresholds are never mutated by the store, and never per pair; the caller reads the report
 per family and recalibrates. Automatic recalibration is deliberately left for a later release, once real outcome data
 shows what the distributions look like.
 
 `ListOutcomes(family, limit, after_sequence)` returns the raw records in write order and `ListFamilies()` lists
-every family with outcomes.
+every family with outcomes. For reports computed from a real run, with the numbers explained, see
+[outcomes-demo.md](outcomes-demo.md).
 
 ## Python
 

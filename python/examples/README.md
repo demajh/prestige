@@ -47,6 +47,21 @@ python examples/embedding_cache.py
 
 This is a practical example for RAG (Retrieval-Augmented Generation) applications where you want to cache embeddings from OpenAI, Cohere, or local models.
 
+### outcomes_demo.py
+
+The Python twin of `examples/outcomes.cpp` (see [docs/outcomes-demo.md](../../docs/outcomes-demo.md)):
+- Stores values with `metadata` (task family and ground-truth item id)
+- Asks `candidates()` for the nearest stored values of each query and applies the caller's threshold
+- Records every verdict with `record_outcome()` under a versioned family id
+- Prints `family_report()` for each family: false-accept rate, similarity and rank distributions of the
+  false accepts, and the advisory suggested threshold
+
+Run (from the repository root; semantic mode needs a source build with `PRESTIGE_ENABLE_SEMANTIC=ON` and an ONNX
+model, otherwise the store runs in exact mode and says so):
+```bash
+python python/examples/outcomes_demo.py --model models/bge-small-en-v1.5_onnx/model.onnx
+```
+
 ## Creating Your Own Examples
 
 The Python bindings provide a simple, Pythonic interface:
