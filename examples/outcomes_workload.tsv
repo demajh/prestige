@@ -1,0 +1,237 @@
+# Workload for examples/outcomes.cpp and python/examples/outcomes_demo.py (see docs/outcomes-demo.md).
+#
+# Tab-separated columns: family, kind, item, text
+#   kind = threshold : text is the similarity threshold the caller applies to this family (its starting guess)
+#   kind = item      : a value stored with metadata family=<family>, item=<item>
+#   kind = query     : a query; item is the stored item that should serve it, or "-" when no stored item does
+#
+# The item column of a query is the ground truth the constraint check compares against. A query labelled "-"
+# must not be served from the cache: any candidate the similarity gate lets through for it is a false accept.
+# Every family starts at a deliberately loose 0.70 so that the gate produces evidence on both sides of the
+# threshold it should end up with; the per-family report is what says where that is.
+
+# --- support-faq@v2: canonical support questions; queries are incoming user questions ---------------------
+support-faq@v2	threshold	-	0.70
+support-faq@v2	item	pw-reset-web	How do I reset my password on the web dashboard?
+support-faq@v2	item	pw-reset-mobile	How do I reset my password in the mobile app?
+support-faq@v2	item	invoice-download	Where can I download my monthly invoice?
+support-faq@v2	item	invoice-vat	How do I add a VAT number to my invoices?
+support-faq@v2	item	cancel-sub	How do I cancel my subscription?
+support-faq@v2	item	pause-sub	Can I pause my subscription instead of cancelling?
+support-faq@v2	item	export-data	How do I export all my data as a CSV file?
+support-faq@v2	item	delete-account	How do I permanently delete my account?
+support-faq@v2	item	two-factor	How do I enable two-factor authentication?
+support-faq@v2	item	api-key	Where do I find my API key?
+support-faq@v2	item	team-invite	How do I invite a teammate to my workspace?
+support-faq@v2	item	refund	What is your refund policy?
+# verbatim repeats
+support-faq@v2	query	pw-reset-web	How do I reset my password on the web dashboard?
+support-faq@v2	query	cancel-sub	How do I cancel my subscription?
+# near-duplicates: the same question with small edits, the bulk of real cache traffic
+support-faq@v2	query	pw-reset-web	how do i reset my password on the web dashboard
+support-faq@v2	query	pw-reset-web	How can I reset my password from the web dashboard?
+support-faq@v2	query	pw-reset-mobile	How do I reset my password in the mobile app
+support-faq@v2	query	pw-reset-mobile	How can I reset my password inside the mobile app?
+support-faq@v2	query	invoice-download	Where can I download my monthly invoice
+support-faq@v2	query	invoice-download	Where do I download my monthly invoice?
+support-faq@v2	query	invoice-vat	How do I add a VAT number to my invoices
+support-faq@v2	query	invoice-vat	How can I add my VAT number to the invoices?
+support-faq@v2	query	cancel-sub	How do I cancel my subscription
+support-faq@v2	query	cancel-sub	How can I cancel my subscription?
+support-faq@v2	query	pause-sub	Can I pause my subscription instead of cancelling
+support-faq@v2	query	pause-sub	Can I pause my subscription rather than cancel it?
+support-faq@v2	query	export-data	How do I export all my data as a CSV file
+support-faq@v2	query	export-data	How can I export all of my data to a CSV file?
+support-faq@v2	query	delete-account	How do I permanently delete my account
+support-faq@v2	query	delete-account	How can I delete my account permanently?
+support-faq@v2	query	two-factor	How do I enable two factor authentication
+support-faq@v2	query	two-factor	How can I enable two-factor authentication?
+support-faq@v2	query	api-key	Where do I find my API key
+support-faq@v2	query	api-key	Where can I find my API key?
+support-faq@v2	query	team-invite	How do I invite a teammate to my workspace
+support-faq@v2	query	team-invite	How can I invite a teammate to the workspace?
+support-faq@v2	query	refund	What is your refund policy
+support-faq@v2	query	refund	What's your refund policy?
+# paraphrases
+support-faq@v2	query	pw-reset-web	I forgot my dashboard password, how can I set a new one?
+support-faq@v2	query	pw-reset-mobile	Lost my password in the iOS app, how do I reset it?
+support-faq@v2	query	invoice-download	Can I get a copy of last month's invoice?
+support-faq@v2	query	invoice-vat	I need my company's VAT ID to show up on the invoice.
+support-faq@v2	query	cancel-sub	I want to stop paying, how do I end my plan?
+support-faq@v2	query	pause-sub	Is there a way to put my subscription on hold for a few months?
+support-faq@v2	query	export-data	How can I download everything I have stored as a spreadsheet?
+support-faq@v2	query	delete-account	Please remove my account and all my data for good.
+support-faq@v2	query	two-factor	How do I turn on 2FA for my login?
+support-faq@v2	query	api-key	Where is my API token shown?
+support-faq@v2	query	team-invite	How do I add a colleague to my team account?
+support-faq@v2	query	refund	Do you give money back if I cancel in the first week?
+support-faq@v2	query	two-factor	What's the process for switching on two-step verification?
+support-faq@v2	query	team-invite	Can I add another member to the workspace?
+support-faq@v2	query	pause-sub	Can I pause my subscription for one week only?
+# same topic, different constraint: a sibling item or no item at all
+support-faq@v2	query	pw-reset-mobile	How do I reset my password in the Android app?
+support-faq@v2	query	pw-reset-web	How do I reset my password on the dashboard website?
+support-faq@v2	query	-	How do I reset the password of a teammate from the admin panel?
+support-faq@v2	query	-	How do I cancel just one seat of my team subscription?
+support-faq@v2	query	-	How do I download the invoices of every workspace in my organisation at once?
+support-faq@v2	query	-	Where do I rotate my API key?
+support-faq@v2	query	-	How do I enforce two-factor authentication for every member of my team?
+support-faq@v2	query	-	How do I export my data as JSON instead of CSV?
+support-faq@v2	query	-	How do I change my password without resetting it?
+# unrelated
+support-faq@v2	query	-	What is the capital of France?
+support-faq@v2	query	-	Write a haiku about autumn leaves.
+support-faq@v2	query	-	How tall is Mount Everest?
+support-faq@v2	query	-	Recommend a good pasta recipe.
+
+# --- code-search@v1: one-line descriptions of cached snippets; queries are developer searches --------------
+code-search@v1	threshold	-	0.70
+code-search@v1	item	reverse-string	Reverse a string in place.
+code-search@v1	item	is-palindrome	Check whether a string is a palindrome, ignoring case and punctuation.
+code-search@v1	item	binary-search	Binary search for a value in a sorted array, returning its index or -1.
+code-search@v1	item	merge-sorted	Merge two sorted lists into one sorted list.
+code-search@v1	item	parse-iso-date	Parse an ISO 8601 date string into a datetime.
+code-search@v1	item	retry-backoff	Retry a function call with exponential backoff and jitter.
+code-search@v1	item	read-json-file	Read a JSON file from disk and return the parsed object.
+code-search@v1	item	lru-cache	An LRU cache with a fixed capacity and O(1) get and put.
+code-search@v1	item	debounce	Debounce a function so it runs once after calls stop for a given delay.
+code-search@v1	item	flatten-list	Flatten a nested list into a single flat list.
+code-search@v1	item	http-get-timeout	Send an HTTP GET request with a timeout and return the response body.
+code-search@v1	item	sha256-file	Compute the SHA-256 hash of a file in chunks.
+# verbatim repeats
+code-search@v1	query	reverse-string	Reverse a string in place.
+code-search@v1	query	flatten-list	Flatten a nested list into a single flat list.
+# near-duplicates
+code-search@v1	query	reverse-string	reverse string in place
+code-search@v1	query	reverse-string	Reverse a string in-place
+code-search@v1	query	is-palindrome	Check whether a string is a palindrome ignoring case and punctuation
+code-search@v1	query	is-palindrome	check if a string is a palindrome, ignoring case and punctuation
+code-search@v1	query	binary-search	Binary search for a value in a sorted array returning its index or -1
+code-search@v1	query	binary-search	binary search a sorted array for a value, return its index or -1
+code-search@v1	query	merge-sorted	Merge two sorted lists into one sorted list
+code-search@v1	query	merge-sorted	merge two sorted lists into a single sorted list
+code-search@v1	query	parse-iso-date	Parse an ISO 8601 date string into a datetime
+code-search@v1	query	parse-iso-date	parse ISO 8601 date string to datetime
+code-search@v1	query	retry-backoff	Retry a function call with exponential backoff and jitter
+code-search@v1	query	retry-backoff	retry a function call with exponential backoff plus jitter
+code-search@v1	query	read-json-file	Read a JSON file from disk and return the parsed object
+code-search@v1	query	read-json-file	read a JSON file from disk and return the parsed object as a dict
+code-search@v1	query	lru-cache	An LRU cache with fixed capacity and O(1) get and put
+code-search@v1	query	lru-cache	LRU cache with a fixed capacity and O(1) get/put
+code-search@v1	query	debounce	Debounce a function so it runs once after calls stop for a given delay
+code-search@v1	query	debounce	debounce a function so that it runs once after calls stop for a delay
+code-search@v1	query	flatten-list	Flatten a nested list into a single flat list
+code-search@v1	query	flatten-list	flatten nested list into one flat list
+code-search@v1	query	http-get-timeout	Send an HTTP GET request with a timeout and return the response body
+code-search@v1	query	http-get-timeout	send HTTP GET request with timeout and return response body
+code-search@v1	query	sha256-file	Compute the SHA-256 hash of a file in chunks
+code-search@v1	query	sha256-file	compute the SHA-256 hash of a file chunk by chunk
+# paraphrases
+code-search@v1	query	reverse-string	function that reverses a string
+code-search@v1	query	is-palindrome	check if a string is a palindrome
+code-search@v1	query	binary-search	binary search sorted array
+code-search@v1	query	binary-search	find index of element in sorted list with binary search
+code-search@v1	query	merge-sorted	merge two sorted arrays
+code-search@v1	query	merge-sorted	merge two sorted linked lists into one sorted list
+code-search@v1	query	parse-iso-date	convert ISO 8601 string to datetime
+code-search@v1	query	retry-backoff	retry with exponential backoff
+code-search@v1	query	read-json-file	load json from file
+code-search@v1	query	lru-cache	least recently used cache implementation
+code-search@v1	query	debounce	debounce function calls
+code-search@v1	query	flatten-list	flatten nested lists
+code-search@v1	query	http-get-timeout	http get with timeout
+code-search@v1	query	sha256-file	hash a large file with sha256 without reading it all into memory
+code-search@v1	query	retry-backoff	how to retry a failing request with jitter
+code-search@v1	query	flatten-list	turn a list of lists into one list
+# close but different: the embedding barely sees the difference
+code-search@v1	query	-	sort a list in place
+code-search@v1	query	-	check if a number is a palindrome
+code-search@v1	query	-	binary search tree insert
+code-search@v1	query	-	merge two dictionaries
+code-search@v1	query	-	parse a date in US format MM/DD/YYYY
+code-search@v1	query	-	retry a function a fixed number of times without delay
+code-search@v1	query	-	write a JSON file to disk
+code-search@v1	query	-	LFU cache with fixed capacity
+code-search@v1	query	-	throttle a function to run at most once per interval
+code-search@v1	query	-	http post request with json body
+code-search@v1	query	-	compute md5 of a string
+code-search@v1	query	-	reverse a linked list
+# unrelated
+code-search@v1	query	-	best places to visit in Lisbon
+code-search@v1	query	-	why is the sky blue
+
+# --- ticket-dedup@v1: open incident tickets; queries are new tickets that may duplicate one -----------------
+ticket-dedup@v1	threshold	-	0.70
+ticket-dedup@v1	item	T-101	Login page returns 502 Bad Gateway for users in the EU region.
+ticket-dedup@v1	item	T-102	Login page returns 502 Bad Gateway for users in the US region.
+ticket-dedup@v1	item	T-103	Dashboard charts show no data for the last 24 hours.
+ticket-dedup@v1	item	T-104	Scheduled report emails are delivered twice.
+ticket-dedup@v1	item	T-105	Uploading a CSV larger than 10 MB fails with a timeout.
+ticket-dedup@v1	item	T-106	Dark mode toggle does not persist after logout.
+ticket-dedup@v1	item	T-107	Search results ignore the date filter.
+ticket-dedup@v1	item	T-108	Webhook deliveries are delayed by several minutes during peak hours.
+ticket-dedup@v1	item	T-109	Password reset email never arrives for Outlook addresses.
+ticket-dedup@v1	item	T-110	Mobile app crashes when opening a shared folder.
+ticket-dedup@v1	item	T-111	Export to PDF cuts off the last column of wide tables.
+ticket-dedup@v1	item	T-112	API rate limit headers report the wrong reset time.
+# verbatim repeats
+ticket-dedup@v1	query	T-103	Dashboard charts show no data for the last 24 hours.
+ticket-dedup@v1	query	T-107	Search results ignore the date filter.
+# near-duplicates
+ticket-dedup@v1	query	T-101	Login page returns 502 Bad Gateway for users in the EU region
+ticket-dedup@v1	query	T-101	Login page returns a 502 Bad Gateway for EU region users.
+ticket-dedup@v1	query	T-102	Login page returns 502 Bad Gateway for users in the US region
+ticket-dedup@v1	query	T-102	Login page returns a 502 Bad Gateway for US region users.
+ticket-dedup@v1	query	T-103	Dashboard charts show no data for the last 24 hours
+ticket-dedup@v1	query	T-103	Dashboard charts are showing no data for the last 24 hours.
+ticket-dedup@v1	query	T-104	Scheduled report emails are delivered twice
+ticket-dedup@v1	query	T-104	Scheduled report emails get delivered twice.
+ticket-dedup@v1	query	T-105	Uploading a CSV larger than 10 MB fails with a timeout
+ticket-dedup@v1	query	T-105	Uploading a CSV bigger than 10 MB fails with a timeout.
+ticket-dedup@v1	query	T-106	Dark mode toggle does not persist after logout
+ticket-dedup@v1	query	T-106	Dark mode toggle doesn't persist after logout.
+ticket-dedup@v1	query	T-107	Search results ignore the date filter
+ticket-dedup@v1	query	T-107	Search results are ignoring the date filter.
+ticket-dedup@v1	query	T-108	Webhook deliveries are delayed by several minutes during peak hours
+ticket-dedup@v1	query	T-108	Webhook deliveries are delayed several minutes at peak hours.
+ticket-dedup@v1	query	T-109	Password reset email never arrives for Outlook addresses
+ticket-dedup@v1	query	T-109	Password reset emails never arrive for Outlook addresses.
+ticket-dedup@v1	query	T-110	Mobile app crashes when opening a shared folder
+ticket-dedup@v1	query	T-110	Mobile app crashes on opening a shared folder.
+ticket-dedup@v1	query	T-111	Export to PDF cuts off the last column of wide tables
+ticket-dedup@v1	query	T-111	PDF export cuts off the last column of wide tables.
+ticket-dedup@v1	query	T-112	API rate limit headers report the wrong reset time
+ticket-dedup@v1	query	T-112	API rate-limit headers report the wrong reset time.
+# paraphrases
+ticket-dedup@v1	query	T-101	502 Bad Gateway on the login page for EU customers
+ticket-dedup@v1	query	T-101	Users in Europe cannot log in: the login page shows a 502 error
+ticket-dedup@v1	query	T-102	Login 502 for US customers
+ticket-dedup@v1	query	T-102	502 Bad Gateway on login for customers in the United States
+ticket-dedup@v1	query	T-103	Charts on the dashboard are empty for the past day
+ticket-dedup@v1	query	T-103	The dashboard is blank for the last 24h
+ticket-dedup@v1	query	T-104	We receive every scheduled report email two times
+ticket-dedup@v1	query	T-104	Duplicate copies of the scheduled report are being sent
+ticket-dedup@v1	query	T-105	CSV import times out for files over 10 MB
+ticket-dedup@v1	query	T-105	Large CSV uploads (12 MB) time out
+ticket-dedup@v1	query	T-106	Dark mode resets to light after I sign out
+ticket-dedup@v1	query	T-107	Date filter has no effect on search results
+ticket-dedup@v1	query	T-108	Webhooks arrive 5-10 minutes late at busy times
+ticket-dedup@v1	query	T-109	Outlook users don't get the password reset email
+ticket-dedup@v1	query	T-110	App crashes on opening a folder shared with me (iOS)
+ticket-dedup@v1	query	T-110	Mobile app crashes when opening a shared folder on Android
+ticket-dedup@v1	query	T-111	PDF export truncates the rightmost column on wide tables
+ticket-dedup@v1	query	T-112	X-RateLimit-Reset header shows an incorrect timestamp
+# same wording, different incident: region, status code, direction of the bug, format
+ticket-dedup@v1	query	-	Login page returns 502 Bad Gateway for users in the APAC region.
+ticket-dedup@v1	query	-	Login page returns 504 Gateway Timeout for users in the EU region.
+ticket-dedup@v1	query	-	Dashboard charts show data for the wrong timezone.
+ticket-dedup@v1	query	-	Scheduled report emails are not delivered at all.
+ticket-dedup@v1	query	-	Uploading a CSV with non-UTF-8 characters fails with a parse error.
+ticket-dedup@v1	query	-	Dark mode toggle is missing from the settings page.
+ticket-dedup@v1	query	-	Webhook deliveries fail with 401 after the token rotation.
+ticket-dedup@v1	query	-	Password reset email arrives but the link has already expired.
+ticket-dedup@v1	query	-	Export to CSV cuts off the last column of wide tables.
+ticket-dedup@v1	query	-	API rate limit is too low for our nightly batch jobs.
+# unrelated
+ticket-dedup@v1	query	-	Please add a Spanish translation of the help centre.
+ticket-dedup@v1	query	-	Thanks for the quick fix last week, all good now.
