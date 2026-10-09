@@ -165,6 +165,7 @@ skill format: `https://raw.githubusercontent.com/demajh/prestige/main/skill.md`.
 | [Cache Semantics](docs/cache-semantics.md) | TTL, LRU eviction, health stats |
 | [Decision Records](docs/provenance.md) | Provenance committed with the write; read-time guard, repair queue, integrity debt |
 | [Candidates and Outcomes](docs/candidates.md) | Ranked candidates with metadata; outcome records and per-family false-accept reports |
+| [Outcomes Demo](docs/outcomes-demo.md) | Worked example: per-family false-accept rates and suggested thresholds from a synthetic workload |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |
 | [Observability](docs/observability.md) | Metrics and tracing |

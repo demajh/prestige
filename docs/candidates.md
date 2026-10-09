@@ -13,6 +13,9 @@ This document covers the three pieces that make that possible:
 - **Outcomes** record what the caller decided about a candidate, per task family, so thresholds can be calibrated
   from measured false-accept rates instead of guesswork.
 
+[outcomes-demo.md](outcomes-demo.md) runs this loop end to end over a synthetic workload of three task families and
+shows the per-family reports it produces.
+
 ## Candidates
 
 ```cpp
@@ -109,7 +112,8 @@ per family and recalibrates. Automatic recalibration is deliberately left for a 
 shows what the distributions look like.
 
 `ListOutcomes(family, limit, after_sequence)` returns the raw records in write order and `ListFamilies()` lists
-every family with outcomes.
+every family with outcomes. For reports computed from a real run, with the numbers explained, see
+[outcomes-demo.md](outcomes-demo.md).
 
 ## Python
 
