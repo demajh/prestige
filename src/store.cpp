@@ -1966,11 +1966,20 @@ rocksdb::Status Store::GetFamilyReport(std::string_view family_id, FamilyReport*
   out->false_accept_rate = judged ? static_cast<double>(out->rejected) / static_cast<double>(judged) : 0.0;
 
   // Advisory threshold: the lowest bucket edge above which false accepts are at most 5% of judged candidates,
-  // with at least 20 judged candidates above it. Only offered when there is something to calibrate against.
+  // with at least 20 judged candidates above it. Only offered when there is something to calibrate against, and
+  // never below the lowest bucket in which a candidate was actually judged: the cumulative counts do not change
+  // below that bucket, so without the floor a family judged entirely above its gate would be advised 0.00.
   if (out->rejected > 0) {
+    int lowest_judged = 0;
+    for (int b = 0; b < 20; ++b) {
+      if (out->accepted_similarity_hist[static_cast<size_t>(b)] + out->rejected_similarity_hist[static_cast<size_t>(b)] > 0) {
+        lowest_judged = b;
+        break;
+      }
+    }
     uint64_t acc = 0, rej = 0;
     float suggestion = -1.0f;
-    for (int b = 19; b >= 0; --b) {
+    for (int b = 19; b >= lowest_judged; --b) {
       acc += out->accepted_similarity_hist[static_cast<size_t>(b)];
       rej += out->rejected_similarity_hist[static_cast<size_t>(b)];
       const uint64_t n = acc + rej;

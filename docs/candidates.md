@@ -107,7 +107,8 @@ store->GetFamilyReport("support-faq@v3", &r);
 
 `suggested_threshold` is **advisory**: it is the lowest similarity bucket edge above which recorded false accepts are
 at most 5% of judged candidates, computed only when at least 20 judged candidates sit above that edge and at least one
-rejection has been recorded. Thresholds are never mutated by the store, and never per pair; the caller reads the report
+rejection has been recorded, and never below the lowest bucket in which a candidate was judged (a family gated at 0.90
+whose judged candidates all sit above the gate is advised 0.90, not 0.00). Thresholds are never mutated by the store, and never per pair; the caller reads the report
 per family and recalibrates. Automatic recalibration is deliberately left for a later release, once real outcome data
 shows what the distributions look like.
 

@@ -45,10 +45,10 @@ Two settings matter for reading the numbers:
 - Every family starts at a deliberately loose threshold of **0.70**. A gate only produces evidence above itself:
   the report sees the candidates the gate let through and nothing below it. Started at 0.85 instead, the same
   workload judges 31, 34 and 38 candidates per family: `code-search@v1` records no false accept at all and gets no
-  suggestion, `support-faq@v2` records one and gets a degenerate `0.00` (every edge below the gate carries the same
-  30-to-1 count, so the lowest edge wins), and only `ticket-dedup@v1` still answers 0.95. Starting loose is the
-  learning phase; the report then says where the gate belongs, and every outcome carries the threshold that was
-  applied when it was recorded.
+  suggestion, `support-faq@v2` records one and is advised 0.85, its own gate, because the advice never falls below
+  the lowest bucket in which a candidate was judged, and only `ticket-dedup@v1` still answers 0.95. Starting loose
+  is the learning phase; the report then says where the gate belongs, and every outcome carries the threshold that
+  was applied when it was recorded.
 - The store's own dedup threshold (`semantic_threshold`) is set to **1.0**, so `Put` merges nothing and each of
   the 36 values stays its own object with its own `item`. The only threshold under test is the caller's, applied
   to the `Candidates()` list. (In exact mode the question does not arise.)
@@ -223,9 +223,9 @@ near-verbatim queries and recompute the nine paraphrases it currently serves bet
 trade is right depends on what a wrong answer costs, so the number is a suggestion and the decision stays with
 the caller. The store never changes a threshold on its own, and the threshold the caller applied is recorded
 with every outcome, so a recalibration is auditable after the fact. One more reason to read it as advice: the
-report only sees what the gate let through, so a suggestion at or below the threshold that was applied (the
-`0.00` a 0.85 start produces for `support-faq@v2`) says nothing about the region below the gate, where no
-candidate was ever judged.
+report only sees what the gate let through, so a suggestion equal to the threshold that was applied (what a 0.85
+start produces for `support-faq@v2`) says nothing about the region below the gate, where no candidate was ever
+judged; the advice is floored at the lowest judged bucket for exactly that reason.
 
 **Why per family, never per pair.** A threshold tuned per stored value, or per (query, candidate) pair, fits the
 noise of individual sentences and cannot be explained or transferred; the unit over which a similarity
