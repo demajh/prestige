@@ -109,7 +109,8 @@ py::dict OutcomeRecordToDict(const OutcomeRecord& r) {
                   "candidate_digest"_a = py::bytes(r.outcome.candidate_digest), "rank"_a = r.outcome.rank,
                   "similarity"_a = OptionalScore(r.outcome.similarity),
                   "reranker_score"_a = OptionalScore(r.outcome.reranker_score),
-                  "threshold"_a = OptionalScore(r.outcome.threshold), "reason"_a = r.outcome.reason);
+                  "threshold"_a = OptionalScore(r.outcome.threshold), "reason"_a = r.outcome.reason,
+                  "decision_id"_a = r.outcome.decision_id);
 }
 
 py::dict RecordToDict(const DecisionRecord& rec) {
@@ -222,7 +223,8 @@ class PyStore : public std::enable_shared_from_this<PyStore> {
 
   uint64_t RecordOutcome(const std::string& family_id, const std::string& verdict, py::object candidate, py::object rank,
                          py::object similarity, py::object reranker_score, py::object threshold,
-                         const std::string& tool_version, const std::string& schema_version, const std::string& reason) {
+                         const std::string& tool_version, const std::string& schema_version, const std::string& reason,
+                         const std::string& decision_id) {
     EnsureOpen();
     Outcome o;
     o.family_id = family_id;
@@ -230,6 +232,7 @@ class PyStore : public std::enable_shared_from_this<PyStore> {
     o.tool_version = tool_version;
     o.schema_version = schema_version;
     o.reason = reason;
+    o.decision_id = decision_id;
     if (!candidate.is_none()) {
       // A dict from candidates() carries the object id, digest, rank and scores.
       py::dict c = candidate.cast<py::dict>();
@@ -769,7 +772,7 @@ void BindStore(py::module_& m) {
       .def("record_outcome", &PyStore::RecordOutcome, py::arg("family_id"), py::arg("verdict"),
            py::arg("candidate") = py::none(), py::arg("rank") = py::none(), py::arg("similarity") = py::none(),
            py::arg("reranker_score") = py::none(), py::arg("threshold") = py::none(), py::arg("tool_version") = "",
-           py::arg("schema_version") = "", py::arg("reason") = "",
+           py::arg("schema_version") = "", py::arg("reason") = "", py::arg("decision_id") = "",
            R"doc(Record what you decided about a candidate, keyed by its task family.
 
         Args:
@@ -779,6 +782,8 @@ void BindStore(py::module_& m) {
             candidate: A dict from candidates(); supplies object_id, digest, rank and scores
             rank, similarity, reranker_score, threshold: Override or supply the numbers directly
             tool_version, schema_version, reason: Free-form context
+            decision_id: The decision (put(..., decision=...)) that wrote what was used instead of
+                this candidate, so the rejections a write considered point at that write
 
         Returns:
             The outcome's sequence number

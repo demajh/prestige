@@ -491,6 +491,7 @@ struct Outcome {
   float reranker_score = -1.0f;     // its reranker score (-1 = none)
   float threshold = -1.0f;          // the threshold the caller applied (-1 = not recorded)
   std::string reason;               // optional: which constraint failed
+  std::string decision_id;          // optional: the decision (PutWithDecision) that wrote what was used instead of this candidate
 };
 
 struct OutcomeRecord {

@@ -366,7 +366,8 @@ constexpr char kOutFamily = 'f';
 constexpr char kOutSeq = 'n';
 constexpr size_t kOutMaxFamily = 512;
 constexpr size_t kOutMaxField = 4096;
-constexpr uint8_t kOutVersion = 1;
+constexpr uint8_t kOutVersionV1 = 1;  // rows written before Outcome::decision_id existed
+constexpr uint8_t kOutVersion = 2;    // version 1 plus decision_id, appended last
 
 inline std::string OutFamilyPrefix(std::string_view family) {
   std::string k(1, kOutRecord);
@@ -393,11 +394,14 @@ std::string SerializeOutcomeRecord(const prestige::OutcomeRecord& r) {
   AppendStr(&out, r.outcome.candidate_object_id);
   AppendStr(&out, r.outcome.candidate_digest);
   AppendStr(&out, r.outcome.reason);
+  AppendStr(&out, r.outcome.decision_id);
   return out;
 }
 
 bool DeserializeOutcomeRecord(std::string_view s, prestige::OutcomeRecord* r) {
-  if (s.size() < 18 || static_cast<uint8_t>(s[0]) != kOutVersion) return false;
+  if (s.size() < 18) return false;
+  const uint8_t version = static_cast<uint8_t>(s[0]);
+  if (version != kOutVersionV1 && version != kOutVersion) return false;
   size_t off = 1;
   if (!prestige::internal::DecodeU64LE(s.substr(off, 8), &r->sequence)) return false;
   off += 8;
@@ -416,6 +420,8 @@ bool DeserializeOutcomeRecord(std::string_view s, prestige::OutcomeRecord* r) {
   if (!ReadStr(s, &off, &r->outcome.candidate_object_id)) return false;
   if (!ReadStr(s, &off, &r->outcome.candidate_digest)) return false;
   if (!ReadStr(s, &off, &r->outcome.reason)) return false;
+  r->outcome.decision_id.clear();
+  if (version >= kOutVersion && !ReadStr(s, &off, &r->outcome.decision_id)) return false;
   return off == s.size();
 }
 
@@ -1824,7 +1830,8 @@ rocksdb::Status Store::RecordOutcome(const Outcome& o, uint64_t* sequence_out) {
   if (o.family_id.size() > kOutMaxFamily) return rocksdb::Status::InvalidArgument("family_id is too long");
   const uint8_t v = static_cast<uint8_t>(o.verdict);
   if (v < 1 || v > 3) return rocksdb::Status::InvalidArgument("verdict is not valid");
-  if (o.tool_version.size() > kOutMaxField || o.schema_version.size() > kOutMaxField || o.reason.size() > kOutMaxField) {
+  if (o.tool_version.size() > kOutMaxField || o.schema_version.size() > kOutMaxField || o.reason.size() > kOutMaxField ||
+      o.decision_id.size() > kOutMaxField) {
     return rocksdb::Status::InvalidArgument("outcome field is too long");
   }
   if (!o.candidate_object_id.empty() && o.candidate_object_id.size() != 16) {

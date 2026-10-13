@@ -173,6 +173,7 @@ TEST_F(CandidatesTest, OutcomesAreRecordedListedAndReported) {
   Outcome rejected = MakeOutcome("support-faq@v3", OutcomeVerdict::kRejected, 0.93f, 1);
   rejected.reason = "tenant mismatch";
   rejected.threshold = 0.92f;
+  rejected.decision_id = "dec-0001";  // the write that followed the rejection
   ASSERT_TRUE(store_->RecordOutcome(rejected, &seq).ok());
   EXPECT_EQ(seq, 2u);
 
@@ -187,6 +188,8 @@ TEST_F(CandidatesTest, OutcomesAreRecordedListedAndReported) {
   EXPECT_EQ(list[0].sequence, 1u);
   EXPECT_EQ(list[1].outcome.reason, "tenant mismatch");
   EXPECT_FLOAT_EQ(list[1].outcome.threshold, 0.92f);
+  EXPECT_EQ(list[1].outcome.decision_id, "dec-0001");
+  EXPECT_TRUE(list[0].outcome.decision_id.empty());
   EXPECT_EQ(list[2].outcome.verdict, OutcomeVerdict::kNoCandidate);
   EXPECT_GT(list[0].recorded_at_us, 0u);
 
@@ -250,6 +253,9 @@ TEST_F(CandidatesTest, SuggestedThresholdNeverFallsBelowTheLowestJudgedBucket) {
 TEST_F(CandidatesTest, OutcomeValidation) {
   ASSERT_TRUE(OpenStore().ok());
   EXPECT_TRUE(store_->RecordOutcome(MakeOutcome("", OutcomeVerdict::kAccepted, 0.9f)).IsInvalidArgument());
+  Outcome long_decision = MakeOutcome("f", OutcomeVerdict::kRejected, 0.9f);
+  long_decision.decision_id = std::string(4097, 'd');
+  EXPECT_TRUE(store_->RecordOutcome(long_decision).IsInvalidArgument());
   Outcome bad_verdict = MakeOutcome("f", static_cast<OutcomeVerdict>(7), 0.9f);
   EXPECT_TRUE(store_->RecordOutcome(bad_verdict).IsInvalidArgument());
   Outcome bad_digest = MakeOutcome("f", OutcomeVerdict::kAccepted, 0.9f);

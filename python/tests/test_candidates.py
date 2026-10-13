@@ -57,7 +57,8 @@ def test_outcomes_report_and_listing(store):
     seq = store.record_outcome("support-faq@v3", "accepted", candidate=cand, threshold=0.92,
                                tool_version="resolver/1.4", schema_version="c@2")
     assert seq == 1
-    assert store.record_outcome("support-faq@v3", "rejected", rank=1, similarity=0.93, reason="tenant mismatch") == 2
+    assert store.record_outcome("support-faq@v3", "rejected", rank=1, similarity=0.93, reason="tenant mismatch",
+                                decision_id="dec-0001") == 2
     assert store.record_outcome("support-faq@v3", "no_candidate") == 3
     assert store.record_outcome("billing@v1", "accepted", similarity=0.99) == 4
 
@@ -70,6 +71,7 @@ def test_outcomes_report_and_listing(store):
     assert outcomes[0]["candidate_digest"] == cand["digest"]
     assert outcomes[0]["similarity"] == 1.0 and outcomes[0]["threshold"] == pytest.approx(0.92)
     assert outcomes[1]["reason"] == "tenant mismatch" and outcomes[1]["rank"] == 1
+    assert outcomes[1]["decision_id"] == "dec-0001" and outcomes[0]["decision_id"] == ""
     assert outcomes[2]["similarity"] is None
     assert store.list_outcomes("support-faq@v3", limit=1, after_sequence=1)[0]["sequence"] == 2
 

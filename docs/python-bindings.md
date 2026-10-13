@@ -15,6 +15,17 @@ The distribution is called `prestige-uvs` because the name `prestige` on PyPI be
 name is `prestige`. Wheels are built without semantic mode (`prestige.SEMANTIC_AVAILABLE` is `False`); build from source
 with ONNX Runtime for that.
 
+To see which you got:
+
+```bash
+pip install --no-cache-dir -v prestige-uvs 2>&1 | grep -E "Downloading|Building wheel"   # a .whl download is the wheel
+python -c "import prestige, sys, sysconfig; print(prestige.__version__, sys.version.split()[0], sysconfig.get_platform())"
+```
+
+A `.whl` download is the wheel. A `.tar.gz` download followed by `Building wheel` means pip found no wheel for that
+interpreter and platform (the second line prints both) and compiled the source, which needs the requirements below:
+a missing wheel for that combination, not a package failure.
+
 ### From Source
 
 ```bash

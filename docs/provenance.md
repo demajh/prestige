@@ -14,7 +14,7 @@ The record carries commitments, not bodies:
 | `input_digests` | caller, optional | SHA-256 content keys of the values the decision consumed (`Store::Digest`). The bodies may already be in the store, arrive later, or be evicted. |
 | `note` | caller, optional | Short free text. |
 | `output_digest` | store | Content key of the value that was written. Always resolvable at commit time. |
-| `user_key`, `sequence`, `committed_at_us` | store | The key written, the write-order sequence number, and the wall-clock commit time. |
+| `user_key`, `sequence`, `committed_at_us` | store | The key written, the write-order sequence number, and the wall-clock commit time (see [Witnessed and declared](#witnessed-and-declared)). |
 
 ## Why commitments and not bodies
 
@@ -24,6 +24,64 @@ that the decision depended on particular inputs. So the hashes must land in the 
 and the bodies can be deferred I/O with a receipt. prestige's existing content key (the SHA-256 that drives
 deduplication) already serves as the input snapshot hash; what the record adds is the pointer from the decision
 back to that key, the policy revision, and the parent decision.
+
+## Witnessed and declared
+
+A record has two kinds of field, and a reader should keep them apart.
+
+**Witnessed** fields are set by the store inside the commit: `sequence`, `committed_at_us`, `user_key` and
+`output_digest`. A caller cannot supply or alter them; the `Decision` struct does not carry them, so there is nothing
+to pass in. Together they witness three facts and no more: that the write happened, where it falls among this
+store's decision commits, and what the store host's clock read when it committed.
+
+**Declared** fields are what the caller says: `decision_id`, `policy_revision`, `parent_decision_id`,
+`input_digests`, `note`, and every pair of metadata. The store checks their shape and keeps them verbatim. It does
+not know who the caller was, which runner or build issued the call, or whether the policy revision names a policy
+that was really in force. Authorship is declared; existence, order and time are witnessed. A store that took the
+caller's word for a witnessed field would only hand the caller a longer route to the same claim, which is why there
+is no way to pass one in.
+
+Two consequences for reading the witnessed fields:
+
+- `sequence` orders the decision commits of this one store. It says nothing about reads, about other stores, about
+  when the caller's own work finished, or about the order of two writes that went to different stores. Compare
+  sequences only within a store.
+- `committed_at_us` is the store host's wall clock at commit, in microseconds since the epoch. It is not monotonic
+  (the host clock can step) and it is not the caller's clock. A caller that has its own completion stamp should keep
+  it as a separate declared field rather than read `committed_at_us` as the same event.
+
+If who or what minted a record matters, declare it with the write. The metadata overload of `PutWithDecision`
+(see [candidates.md](candidates.md#value-metadata)) commits a small string map in the same transaction as the
+value and the record:
+
+```cpp
+prestige::Decision d;
+d.decision_id = "dec-2026-10-13-0007";
+d.policy_revision = "policy@3f9c2a";
+d.input_digests = {input};
+store->PutWithDecision("memory/summary/42", summary_bytes, d,
+                       prestige::Metadata{{"actor", "summarizer"},
+                                          {"runner", "worker-17"},
+                                          {"build", "2026.10.13+g9f1c2a"},
+                                          {"clock", "worker-17 wall clock, NTP-synced"},
+                                          {"completed_at_us", "1760400000123456"}});
+```
+
+```python
+store.put("memory/summary/42", summary,
+          decision=prestige.Decision("dec-2026-10-13-0007", "policy@3f9c2a", input_digests=inputs),
+          metadata={"actor": "summarizer", "runner": "worker-17", "build": "2026.10.13+g9f1c2a",
+                    "clock": "worker-17 wall clock, NTP-synced", "completed_at_us": "1760400000123456"})
+```
+
+Every pair in that map is declared: the record then shows which runner, build and clock the caller claims, beside
+the one clock reading the store witnessed. Metadata belongs to the value, and writing the same bytes again merges
+the maps with later pairs winning per key, so a field that must keep its first value (the `actor` that originally
+wrote it) goes in the first write only; see the merge rule in [candidates.md](candidates.md#value-metadata).
+
+`input_digests` cannot tell "this decision consumed nothing" from "the inputs were not recorded": both are an empty
+list, in C++ and in Python, where omitting `input_digests` is the same as passing `[]`. When a decision consumed
+nothing, say so in `note` (`inputs: none`); read an empty list without that note as not recorded, never as none.
 
 ## Reading, failing, and repairing
 
