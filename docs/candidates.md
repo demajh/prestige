@@ -60,6 +60,11 @@ alone. When the last key referencing a value is deleted, its metadata goes with 
 bytes, values up to 4096 bytes. `PutWithDecision` has an overload that takes metadata too, so a write can carry both
 its decision record and its metadata in one transaction.
 
+Because merge is last-writer-wins per key, a field that records an origin (`first_seen`, `source`, the `actor` that
+first wrote the value) survives only if nobody sends it again: write it once, with the first write, and leave it out
+of every later map. A caller that resends its whole map on every write turns every origin field into a last-touch
+field. The store does not know which keys are origins and has no keep-first mode.
+
 Use an **explicit, versioned task-family id** as the identity (`"support-faq@v3"`), and carry tool and schema
 versions as metadata. Do not derive the family from prompt text: the point of the metadata is that it is stable
 when the text is not.
@@ -78,6 +83,7 @@ o.threshold = 0.92f;
 o.tool_version = "resolver/1.4";
 o.schema_version = "constraints@2";
 o.reason = "tenant mismatch";
+o.decision_id = "dec-2026-10-13-0007";   // optional: the decision that wrote what was used instead
 store->RecordOutcome(o);
 ```
 
@@ -88,6 +94,41 @@ The three verdicts:
 | `kAccepted` | The candidate passed the caller's checks and was reused. |
 | `kRejected` | The candidate was above the caller's threshold but failed a constraint check: a **false accept** of the similarity gate. |
 | `kNoCandidate` | Nothing above the threshold; a fresh computation followed. |
+
+`decision_id` is optional and ties a verdict to a write. When every candidate is rejected and a fresh value is
+written with `PutWithDecision`, recording the rejections under that write's decision id turns "this is new" into a
+dated claim with its own evidence: the decision record says what was written and when, and the outcomes say which
+existing values were considered and why each was refused.
+
+### Record the rejections, then write
+
+```cpp
+std::vector<prestige::Candidate> cands;
+store->Candidates(query_text, q, &cands);
+const std::string decision_id = NextDecisionId();          // the caller's own id scheme
+for (const auto& c : cands) {
+  prestige::Outcome o;
+  o.family_id = "support-faq@v3";
+  o.verdict = prestige::OutcomeVerdict::kRejected;         // every candidate failed the gate
+  o.candidate_object_id = c.object_id;
+  o.candidate_digest = c.digest;
+  o.rank = c.rank;
+  o.similarity = c.similarity;
+  o.threshold = 0.92f;
+  o.reason = "tenant mismatch";
+  o.decision_id = decision_id;
+  store->RecordOutcome(o);
+}
+prestige::Decision d;
+d.decision_id = decision_id;
+d.policy_revision = "policy@3f9c2a";
+for (const auto& c : cands) d.input_digests.push_back(c.digest);   // what the decision looked at
+store->PutWithDecision("faq/43", fresh_answer, d);
+```
+
+Outcomes and the write are separate transactions. Record the rejections first: a crash between the two leaves
+rejections naming a decision the store never saw, which `GetDecision` reports as not found, and never a decision
+record that claims rejections that were not stored.
 
 Accepts are recorded as well as rejects because a false-accept **rate** needs a denominator. Outcomes are persisted
 in their own column family, totally ordered by a sequence number, and counted through the metrics sink
@@ -130,7 +171,10 @@ with prestige.open("./cache") as store:
         store.record_outcome("support-faq@v3", "accepted", candidate=best, threshold=0.92)
     elif best:
         store.record_outcome("support-faq@v3", "rejected", candidate=best, threshold=0.92,
-                             reason="tenant mismatch")
+                             reason="tenant mismatch", decision_id="dec-0007")
+        store.put("faq/43", fresh_answer,                         # the write the rejection informed
+                  decision=prestige.Decision("dec-0007", "policy@3f9c2a",
+                                             input_digests=[c["digest"] for c in cands]))
     else:
         store.record_outcome("support-faq@v3", "no_candidate")
 
@@ -142,13 +186,15 @@ with prestige.open("./cache") as store:
 ```
 
 `record_outcome` accepts a candidate dict straight from `candidates()`, which supplies the object id, digest, rank and
-scores; any of them can be overridden by keyword.
+scores; any of them can be overridden by keyword. `decision_id` names the write the verdict informed, and comes back
+in `list_outcomes` (empty for outcomes recorded without one).
 
 ## Storage
 
 Two new column families: `prestige_value_meta` (object id to serialized metadata) and `prestige_outcomes`
 (`o` + family + sequence for records, `f` + family for the registry, `n` for the sequence counter). Existing stores
-gain both on first open.
+gain both on first open. Outcome rows carry a format version; rows written before `decision_id` existed decode with
+an empty one.
 
 ## Metrics
 

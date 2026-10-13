@@ -75,7 +75,13 @@ db->Get("key1", &value);  // "hello world"
 ```bash
 pip install prestige-uvs        # binary wheels with RocksDB bundled (Linux x86_64, macOS); import name is `prestige`
 # or from source (needed for semantic mode): cd python && pip install .
+pip install --no-cache-dir -v prestige-uvs 2>&1 | grep -E "Downloading|Building wheel"   # a .whl download is the wheel
+python -c "import prestige, sys, sysconfig; print(prestige.__version__, sys.version.split()[0], sysconfig.get_platform())"
 ```
+
+A `.tar.gz` download followed by `Building wheel` means pip found no wheel for that interpreter and platform (the
+second line prints both) and compiled the source: a missing wheel for that combination, not a package failure. Wheels
+cover Python 3.9 to 3.13 on Linux x86_64 and macOS.
 
 ```python
 import prestige
