@@ -16,6 +16,9 @@ The record carries commitments, not bodies:
 | `output_digest` | store | Content key of the value that was written. Always resolvable at commit time. |
 | `user_key`, `sequence`, `committed_at_us` | store | The key written, the write-order sequence number, and the wall-clock commit time (see [Witnessed and declared](#witnessed-and-declared)). |
 
+[Who stamps what, field by field](#who-stamps-what-field-by-field) gives the same split for every field, with what the
+store checks before it accepts each one, and extends it to value metadata and outcome records.
+
 ## Why commitments and not bodies
 
 A missing body is detectable: the digest is in the record, the store has no object for it, and a reader can say
@@ -82,6 +85,78 @@ wrote it) goes in the first write only; see the merge rule in [candidates.md](ca
 `input_digests` cannot tell "this decision consumed nothing" from "the inputs were not recorded": both are an empty
 list, in C++ and in Python, where omitting `input_digests` is the same as passing `[]`. When a decision consumed
 nothing, say so in `note` (`inputs: none`); read an empty list without that note as not recorded, never as none.
+
+## Who stamps what, field by field
+
+An agent who wrote to us over A2A asked: "Which fields of a decision record does the store stamp itself?" Four. The
+store stamps `sequence`, `committed_at_us`, `user_key` and `output_digest`, and nothing else. The record's identity
+(`decision_id`) is the caller's, and so are the verdict and its cause on an outcome record (`verdict`, `reason`), where
+the store stamps only `sequence` and `recorded_at_us`. Every caller field is kept **verbatim**: the bytes come back as
+they went in, with no trimming, normalization, encoding check or truncation. A field over its limit is not cut; the
+whole write is refused with `InvalidArgument` and nothing is stored.
+
+So a reader can tell the two kinds of timestamp apart by name alone. `committed_at_us` on a decision record and
+`recorded_at_us` on an outcome record are the only times the store writes. Any other time in a record, whether in
+`note`, in a metadata pair or in a field the caller named `completed_at_us`, is a claim the caller made, and the store
+did not read a clock to check it.
+
+### Decision record
+
+| Field | Set by | Checked at write | What the store keeps |
+|---|---|---|---|
+| `decision_id` | caller | Required, at most 4096 bytes. An id that already names a different write (another key or other content) is refused; the same key and content is a replay and a no-op. | Verbatim. Also the key the record is looked up by. |
+| `policy_revision` | caller | Required, at most 4096 bytes. | Verbatim. Never resolved against a policy. |
+| `parent_decision_id` | caller | At most 4096 bytes. Not checked to exist. | Verbatim. |
+| `input_digests` | caller | Each exactly 32 bytes, at most 65536 of them. The bodies are not checked to exist at write time; that is the job of `GetDecision` and the sweep. | Verbatim, in the order given. The Python binding turns a 64-character hex string into its 32 bytes before the store sees it. |
+| `note` | caller | At most 65536 bytes. | Verbatim. |
+| `sequence` | store | | Taken from an in-memory counter once per `PutWithDecision` call, before the first attempt, so a retried transaction keeps its number and a failed call leaves a gap. Monotone within one store. |
+| `committed_at_us` | store | | The store's clock, read inside the transaction just before commit, microseconds since the Unix epoch. The clock is the host wall clock unless the process that opened the store set `Options::custom_clock`, so the stamp is as good as that process. |
+| `user_key` (`key` in Python) | store | | Copied from the key argument of the `PutWithDecision` call, not from the `Decision`: the key the store actually wrote. |
+| `output_digest` | store | | SHA-256 the store computed over the written bytes, after the store's normalization when one is configured. `Digest` returns the same value for the same bytes. |
+
+Three more names come back from `GetDecision` and are in neither column: `resolved`, `missing_digests` and
+`queued_for_repair` (`DecisionCheck` in C++, keys of the same dict in Python). They are computed at read time against
+the bodies present at that moment and are never stored, so two reads of one record can disagree as bodies arrive or are
+evicted.
+
+### Value metadata written with the record
+
+| Field | Set by | Checked at write | What the store keeps |
+|---|---|---|---|
+| each pair | caller | At most 64 pairs. Keys non-empty and at most 256 bytes, values at most 4096 bytes. | Each pair verbatim, but the map belongs to the value, not to the record: a later write of the same bytes with metadata merges the maps, later pairs winning per key, and the merged map must still fit 64 pairs. |
+
+### Outcome record
+
+| Field | Set by | Checked at write | What the store keeps |
+|---|---|---|---|
+| `family_id` | caller | Required, at most 512 bytes. | Verbatim. Also the prefix the record is listed under. |
+| `verdict` | caller | Must be `accepted`, `rejected` or `no_candidate`. | As given. The store never derives a verdict and never changes one. |
+| `reason` | caller | At most 4096 bytes. | Verbatim. |
+| `tool_version`, `schema_version` | caller | At most 4096 bytes each. | Verbatim. |
+| `decision_id` | caller | At most 4096 bytes. Not checked to exist. | Verbatim. |
+| `candidate_object_id` | caller | Empty or exactly 16 bytes. Not checked to exist. | Verbatim. |
+| `candidate_digest` | caller | Empty or exactly 32 bytes. Not checked to exist. | Verbatim. |
+| `rank`, `similarity`, `reranker_score`, `threshold` | caller | No range check. | As given. They are the numbers from the list the caller saw (in Python, copied from the candidate dict unless overridden) and are never recomputed. A negative score reads as not recorded, `None` in Python. |
+| `sequence` | store | | The next number of one counter shared by every family, taken under lock inside the transaction. |
+| `recorded_at_us` | store | | The store's clock when the record was assembled, with the same meaning and caveats as `committed_at_us`. |
+
+The consequence for reading outcomes is the same as for decisions. A verdict of `rejected` with the reason
+`tenant mismatch` is a declared pair: the store will record it from a caller that ran the check and from one that did
+not, and it cannot tell them apart. What it witnesses is that this verdict was recorded, at this sequence, at this
+reading of its clock.
+
+In Python the split can be made with the names alone:
+
+```python
+rec = store.get_decision("dec-0001")
+stamped = {k: rec[k] for k in ("sequence", "committed_at_us", "key", "output_digest")}
+declared = {k: rec[k] for k in ("decision_id", "policy_revision", "parent_decision_id", "input_digests", "note")}
+read_time = {k: rec[k] for k in ("resolved", "missing_digests", "queued_for_repair")}
+
+out = store.list_outcomes("support-faq@v3", limit=1)[0]
+stamped = {k: out[k] for k in ("sequence", "recorded_at_us")}
+declared = {k: v for k, v in out.items() if k not in stamped}
+```
 
 ## Reading, failing, and repairing
 
