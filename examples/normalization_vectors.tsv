@@ -1,0 +1,38 @@
+# Normalization test vectors for prestige (docs/normalization.md).
+# vector-set: 1
+# rule: prestige 0.2.0 (src/normalize.cpp)
+# Columns, tab-separated: id, mode, input_hex, expected_hex, note. Bytes are uppercase hex; "-" is zero bytes.
+# An id is never reused and its bytes never change. Adding or retiring a vector raises vector-set.
+NV-001	kNone	202048656C6C6F200920576F726C642020	202048656C6C6F200920576F726C642020	kNone leaves every byte alone
+NV-002	kWhitespace	-	-	empty input stays empty
+NV-003	kWhitespace	202068656C6C6F20090A20776F726C642020	68656C6C6F20776F726C64	leading and trailing whitespace trimmed, inner run collapsed to one space
+NV-004	kWhitespace	6120090A0D0B0C62	612062	all six whitespace bytes (20 09 0A 0D 0B 0C) in one run
+NV-005	kWhitespace	20090D0A20	-	whitespace only becomes empty
+NV-006	kWhitespace	48656C6C6F2020576F726C64	48656C6C6F20576F726C64	case is kept in kWhitespace
+NV-007	kWhitespace	61C2A062E3808063	61C2A062E3808063	U+00A0 and U+3000 are not whitespace to the rule
+NV-008	kWhitespace	6F6B20F09F988020206F6B	6F6B20F09F9880206F6B	4-byte sequence passes through
+NV-009	kASCII	202048454C4C4F2020576F726C6420	68656C6C6F20776F726C64	whitespace rule plus A-Z to a-z
+NV-010	kASCII	5B415D5E5F607B5A7D7E203039	5B615D5E5F607B7A7D7E203039	only A-Z change; neighbouring punctuation and digits do not
+NV-011	kASCII	C389434F4C45	C389636F6C65	kASCII does not fold non-ASCII letters
+NV-012	kASCII	EFAC816C652078C2B2	EFAC816C652078C2B2	kASCII leaves ligatures and superscripts alone
+NV-013	kASCII	E2414243	E2414263	lead byte E2 without continuation bytes: the next two bytes are copied unfolded as part of its 3-byte length
+NV-014	kUnicode	EFAC8020EFAC8120EFAC8220EFAC8320EFAC84	666620666920666C206666692066666C	ligatures U+FB00..U+FB04
+NV-015	kUnicode	EFAC8520EFAC86	7374207374	U+FB05 (long s t) and U+FB06 both become st
+NV-016	kUnicode	E281B0C2B9C2B2C2B3E281B4E281B5E281B6E281B7E281B8E281B9	30313233343536373839	superscript digits 0-9
+NV-017	kUnicode	E281BAE281BBE281BCE281BDE281BEE281BF	2B2D3D28296E	superscript + - = ( ) n
+NV-018	kUnicode	78E281B1	78E281B1	U+2071 superscript i is not in the table
+NV-019	kUnicode	E28280E28281E28282E28283E28284E28285E28286E28287E28288E28289	30313233343536373839	subscript digits 0-9
+NV-020	kUnicode	E2828AE2828BE2828CE2828DE2828E	2B2D3D2829	subscript + - = ( )
+NV-021	kUnicode	C2BD20C2BC20C2BE	312F3220312F3420332F34	fractions become three ASCII bytes each
+NV-022	kUnicode	EFBCA1EFBCA2EFBCBA20EFBD81EFBD82EFBD9A20EFBC90EFBC99	61627A2061627A203039	fullwidth letters fold to lowercase ASCII, fullwidth digits to ASCII digits
+NV-023	kUnicode	EFBC81EFBCA0EFBCBBEFBD80EFBD9BEFBD9E	21405B607B7E	fullwidth punctuation U+FF01..U+FF5E
+NV-024	kUnicode	61E3808062EFBD9F	61E3808062EFBD9F	U+3000 ideographic space and U+FF5F are outside the fullwidth range and unchanged
+NV-025	kUnicode	C380C389C38EC395C39CC39E	C3A0C3A9C3AEC3B5C3BCC3BE	Latin-1 uppercase U+00C0..U+00DE folds to lowercase
+NV-026	kUnicode	C39720C39F20C3B7	C39720C39F20C3B7	multiplication sign, sharp s and division sign are unchanged
+NV-027	kUnicode	C48020C5B820CEA320D096	C48020C5B820CEA320D096	letters outside Latin-1 are not folded
+NV-028	kUnicode	45CC81	65CC81	no composition: E + U+0301 becomes e + U+0301, which differs from the output for U+00C9
+NV-029	kUnicode	C389	C3A9	precomposed U+00C9 becomes U+00E9; compare the previous vector
+NV-030	kUnicode	61C2A062	61C2A062	U+00A0 is neither whitespace nor mapped
+NV-031	kUnicode	41FF42	61FF62	invalid byte FF is copied; the bytes around it still fold
+NV-032	kUnicode	41EFAC	61EFAC	truncated ligature prefix at end of input is copied
+NV-033	kUnicode	2020EFBCA8656C6C6F2020EFAC816C6520C2BD20C389434F4C452078C2B220	68656C6C6F2066696C6520312F3220C3A9636F6C65207832	every rule in one value
