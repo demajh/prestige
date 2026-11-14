@@ -1,0 +1,1218 @@
+{
+  "encoder": {
+    "version": "example-row-json/1",
+    "line": "json.dumps(row, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False, allow_nan=False).encode(\"utf-8\")",
+    "hash": "sha256 over the line's bytes, lowercase hex",
+    "trailing_newline_inside_hash": false,
+    "text": "UTF-8, written as given: no Unicode normalization, no \\u escapes except the ones JSON requires",
+    "keys": "ASCII, sorted by code point",
+    "integers": "decimal digits, '-' for negatives, no exponent, no fraction, when |n| <= 2^53 - 1",
+    "large_integers": "outside that range the value is the object {\"int\":\"<decimal digits>\"}",
+    "null": "null",
+    "span": "byte offsets [start, end) of a field's value in the line, quotes included, end exclusive",
+    "values_in_this_file": "each field's value is given as a type and a string, so no number parser is needed"
+  },
+  "note": "A matching line proves agreement with the published encoder, not correctness.",
+  "worked_row": {
+    "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":1800,\"leaf_index\":12,\"note\":\"leaf index read from the proof response\",\"outcome_of\":\"att-0040\",\"seq\":41,\"skew_ms\":250,\"state\":\"finished\"}",
+    "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a313830302c226c6561665f696e646578223a31322c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365222c226f7574636f6d655f6f66223a226174742d30303430222c22736571223a34312c22736b65775f6d73223a3235302c227374617465223a2266696e6973686564227d",
+    "byte_count": 189,
+    "line_sha256": "c6c8bca4c471b07ccd15d805d32d37e6cb7cb58ef849f4a1941706127b48879d",
+    "fields": [
+      {
+        "name": "agent",
+        "type": "string",
+        "value": "probe-3",
+        "span": [
+          9,
+          18
+        ],
+        "span_text": "\"probe-3\"",
+        "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+      },
+      {
+        "name": "attempt_id",
+        "type": "string",
+        "value": "att-0041",
+        "span": [
+          32,
+          42
+        ],
+        "span_text": "\"att-0041\"",
+        "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+      },
+      {
+        "name": "credits",
+        "type": "int",
+        "value": "1800",
+        "span": [
+          53,
+          57
+        ],
+        "span_text": "1800",
+        "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+      },
+      {
+        "name": "leaf_index",
+        "type": "int",
+        "value": "12",
+        "span": [
+          71,
+          73
+        ],
+        "span_text": "12",
+        "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+      },
+      {
+        "name": "note",
+        "type": "string",
+        "value": "leaf index read from the proof response",
+        "span": [
+          81,
+          122
+        ],
+        "span_text": "\"leaf index read from the proof response\"",
+        "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+      },
+      {
+        "name": "outcome_of",
+        "type": "string",
+        "value": "att-0040",
+        "span": [
+          136,
+          146
+        ],
+        "span_text": "\"att-0040\"",
+        "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+      },
+      {
+        "name": "seq",
+        "type": "int",
+        "value": "41",
+        "span": [
+          153,
+          155
+        ],
+        "span_text": "41",
+        "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+      },
+      {
+        "name": "skew_ms",
+        "type": "int",
+        "value": "250",
+        "span": [
+          166,
+          169
+        ],
+        "span_text": "250",
+        "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+      },
+      {
+        "name": "state",
+        "type": "string",
+        "value": "finished",
+        "span": [
+          178,
+          188
+        ],
+        "span_text": "\"finished\"",
+        "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+      }
+    ]
+  },
+  "edge_rows": [
+    {
+      "name": "null",
+      "field": "outcome_of",
+      "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":1800,\"leaf_index\":12,\"note\":\"leaf index read from the proof response\",\"outcome_of\":null,\"seq\":41,\"skew_ms\":250,\"state\":\"finished\"}",
+      "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a313830302c226c6561665f696e646578223a31322c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365222c226f7574636f6d655f6f66223a6e756c6c2c22736571223a34312c22736b65775f6d73223a3235302c227374617465223a2266696e6973686564227d",
+      "byte_count": 183,
+      "line_sha256": "438591633acd5817aa366d44d367afc51c821f151e209547340886386fb453c7",
+      "fields": [
+        {
+          "name": "agent",
+          "type": "string",
+          "value": "probe-3",
+          "span": [
+            9,
+            18
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "attempt_id",
+          "type": "string",
+          "value": "att-0041",
+          "span": [
+            32,
+            42
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "credits",
+          "type": "int",
+          "value": "1800",
+          "span": [
+            53,
+            57
+          ],
+          "span_text": "1800",
+          "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+        },
+        {
+          "name": "leaf_index",
+          "type": "int",
+          "value": "12",
+          "span": [
+            71,
+            73
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "value": "leaf index read from the proof response",
+          "span": [
+            81,
+            122
+          ],
+          "span_text": "\"leaf index read from the proof response\"",
+          "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+        },
+        {
+          "name": "outcome_of",
+          "type": "null",
+          "value": null,
+          "span": [
+            136,
+            140
+          ],
+          "span_text": "null",
+          "span_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+        },
+        {
+          "name": "seq",
+          "type": "int",
+          "value": "41",
+          "span": [
+            147,
+            149
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "skew_ms",
+          "type": "int",
+          "value": "250",
+          "span": [
+            160,
+            163
+          ],
+          "span_text": "250",
+          "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "value": "finished",
+          "span": [
+            172,
+            182
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        }
+      ]
+    },
+    {
+      "name": "negative-int",
+      "field": "skew_ms",
+      "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":1800,\"leaf_index\":12,\"note\":\"leaf index read from the proof response\",\"outcome_of\":\"att-0040\",\"seq\":41,\"skew_ms\":-250,\"state\":\"finished\"}",
+      "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a313830302c226c6561665f696e646578223a31322c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365222c226f7574636f6d655f6f66223a226174742d30303430222c22736571223a34312c22736b65775f6d73223a2d3235302c227374617465223a2266696e6973686564227d",
+      "byte_count": 190,
+      "line_sha256": "27f5bb9313c0e2f86137ffe5455f83a66a2cec2b2b92c9e777e651c260a08b2e",
+      "fields": [
+        {
+          "name": "agent",
+          "type": "string",
+          "value": "probe-3",
+          "span": [
+            9,
+            18
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "attempt_id",
+          "type": "string",
+          "value": "att-0041",
+          "span": [
+            32,
+            42
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "credits",
+          "type": "int",
+          "value": "1800",
+          "span": [
+            53,
+            57
+          ],
+          "span_text": "1800",
+          "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+        },
+        {
+          "name": "leaf_index",
+          "type": "int",
+          "value": "12",
+          "span": [
+            71,
+            73
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "value": "leaf index read from the proof response",
+          "span": [
+            81,
+            122
+          ],
+          "span_text": "\"leaf index read from the proof response\"",
+          "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+        },
+        {
+          "name": "outcome_of",
+          "type": "string",
+          "value": "att-0040",
+          "span": [
+            136,
+            146
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "seq",
+          "type": "int",
+          "value": "41",
+          "span": [
+            153,
+            155
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "skew_ms",
+          "type": "int",
+          "value": "-250",
+          "span": [
+            166,
+            170
+          ],
+          "span_text": "-250",
+          "span_sha256": "cd81b1f3be63d7940d8714442ce0b03be4a115843fc66cb9deeeea17da807e0c"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "value": "finished",
+          "span": [
+            179,
+            189
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        }
+      ]
+    },
+    {
+      "name": "int-above-2^53",
+      "field": "credits",
+      "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":{\"int\":\"9007199254740993\"},\"leaf_index\":12,\"note\":\"leaf index read from the proof response\",\"outcome_of\":\"att-0040\",\"seq\":41,\"skew_ms\":250,\"state\":\"finished\"}",
+      "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a7b22696e74223a2239303037313939323534373430393933227d2c226c6561665f696e646578223a31322c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365222c226f7574636f6d655f6f66223a226174742d30303430222c22736571223a34312c22736b65775f6d73223a3235302c227374617465223a2266696e6973686564227d",
+      "byte_count": 211,
+      "line_sha256": "ff30c087476440cc46e08e8368790868db477a17fa9f3d0b38b0fca14ef33996",
+      "fields": [
+        {
+          "name": "agent",
+          "type": "string",
+          "value": "probe-3",
+          "span": [
+            9,
+            18
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "attempt_id",
+          "type": "string",
+          "value": "att-0041",
+          "span": [
+            32,
+            42
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "credits",
+          "type": "int",
+          "value": "9007199254740993",
+          "span": [
+            53,
+            79
+          ],
+          "span_text": "{\"int\":\"9007199254740993\"}",
+          "span_sha256": "cc7becc3484c452e7f46b86a0162b0ce8603088ed26cd34139b0abd16729c2e0"
+        },
+        {
+          "name": "leaf_index",
+          "type": "int",
+          "value": "12",
+          "span": [
+            93,
+            95
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "value": "leaf index read from the proof response",
+          "span": [
+            103,
+            144
+          ],
+          "span_text": "\"leaf index read from the proof response\"",
+          "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+        },
+        {
+          "name": "outcome_of",
+          "type": "string",
+          "value": "att-0040",
+          "span": [
+            158,
+            168
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "seq",
+          "type": "int",
+          "value": "41",
+          "span": [
+            175,
+            177
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "skew_ms",
+          "type": "int",
+          "value": "250",
+          "span": [
+            188,
+            191
+          ],
+          "span_text": "250",
+          "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "value": "finished",
+          "span": [
+            200,
+            210
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        }
+      ]
+    },
+    {
+      "name": "empty-string",
+      "field": "note",
+      "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":1800,\"leaf_index\":12,\"note\":\"\",\"outcome_of\":\"att-0040\",\"seq\":41,\"skew_ms\":250,\"state\":\"finished\"}",
+      "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a313830302c226c6561665f696e646578223a31322c226e6f7465223a22222c226f7574636f6d655f6f66223a226174742d30303430222c22736571223a34312c22736b65775f6d73223a3235302c227374617465223a2266696e6973686564227d",
+      "byte_count": 150,
+      "line_sha256": "1bf8d1f81c27c71bf7232c58382c0a25736cb7aa9aa4734c65bae50c17057f1a",
+      "fields": [
+        {
+          "name": "agent",
+          "type": "string",
+          "value": "probe-3",
+          "span": [
+            9,
+            18
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "attempt_id",
+          "type": "string",
+          "value": "att-0041",
+          "span": [
+            32,
+            42
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "credits",
+          "type": "int",
+          "value": "1800",
+          "span": [
+            53,
+            57
+          ],
+          "span_text": "1800",
+          "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+        },
+        {
+          "name": "leaf_index",
+          "type": "int",
+          "value": "12",
+          "span": [
+            71,
+            73
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "value": "",
+          "span": [
+            81,
+            83
+          ],
+          "span_text": "\"\"",
+          "span_sha256": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+        },
+        {
+          "name": "outcome_of",
+          "type": "string",
+          "value": "att-0040",
+          "span": [
+            97,
+            107
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "seq",
+          "type": "int",
+          "value": "41",
+          "span": [
+            114,
+            116
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "skew_ms",
+          "type": "int",
+          "value": "250",
+          "span": [
+            127,
+            130
+          ],
+          "span_text": "250",
+          "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "value": "finished",
+          "span": [
+            139,
+            149
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        }
+      ]
+    },
+    {
+      "name": "non-ascii",
+      "field": "note",
+      "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":1800,\"leaf_index\":12,\"note\":\"caf\u00e9 \u6771\u4eac \u2713 \ud83e\udded\",\"outcome_of\":\"att-0040\",\"seq\":41,\"skew_ms\":250,\"state\":\"finished\"}",
+      "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a313830302c226c6561665f696e646578223a31322c226e6f7465223a22636166c3a920e69db1e4baac20e29c9320f09fa7ad222c226f7574636f6d655f6f66223a226174742d30303430222c22736571223a34312c22736b65775f6d73223a3235302c227374617465223a2266696e6973686564227d",
+      "byte_count": 171,
+      "line_sha256": "04530cc1a3ef695737fece5a22c76b1d1ae9e49caa09d0918595f97404544900",
+      "fields": [
+        {
+          "name": "agent",
+          "type": "string",
+          "value": "probe-3",
+          "span": [
+            9,
+            18
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "attempt_id",
+          "type": "string",
+          "value": "att-0041",
+          "span": [
+            32,
+            42
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "credits",
+          "type": "int",
+          "value": "1800",
+          "span": [
+            53,
+            57
+          ],
+          "span_text": "1800",
+          "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+        },
+        {
+          "name": "leaf_index",
+          "type": "int",
+          "value": "12",
+          "span": [
+            71,
+            73
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "value": "caf\u00e9 \u6771\u4eac \u2713 \ud83e\udded",
+          "span": [
+            81,
+            104
+          ],
+          "span_text": "\"caf\u00e9 \u6771\u4eac \u2713 \ud83e\udded\"",
+          "span_sha256": "74ff0787cb3618ed1e74db2ce42037d7b5345e668505fb83adc0cce9cfb64434"
+        },
+        {
+          "name": "outcome_of",
+          "type": "string",
+          "value": "att-0040",
+          "span": [
+            118,
+            128
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "seq",
+          "type": "int",
+          "value": "41",
+          "span": [
+            135,
+            137
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "skew_ms",
+          "type": "int",
+          "value": "250",
+          "span": [
+            148,
+            151
+          ],
+          "span_text": "250",
+          "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "value": "finished",
+          "span": [
+            160,
+            170
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        }
+      ]
+    }
+  ],
+  "near_miss_row": {
+    "name": "near-miss",
+    "field": "leaf_index",
+    "line_utf8": "{\"agent\":\"probe-3\",\"attempt_id\":\"att-0041\",\"credits\":1800,\"leaf_index\":13,\"note\":\"leaf index read from the proof response\",\"outcome_of\":\"att-0040\",\"seq\":41,\"skew_ms\":250,\"state\":\"finished\"}",
+    "line_hex": "7b226167656e74223a2270726f62652d33222c22617474656d70745f6964223a226174742d30303431222c2263726564697473223a313830302c226c6561665f696e646578223a31332c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365222c226f7574636f6d655f6f66223a226174742d30303430222c22736571223a34312c22736b65775f6d73223a3235302c227374617465223a2266696e6973686564227d",
+    "byte_count": 189,
+    "line_sha256": "9e4b2b5614187d239acd06e03762b3ea3878209b2018d7c36ea385c75b33f45a",
+    "fields": [
+      {
+        "name": "agent",
+        "type": "string",
+        "value": "probe-3",
+        "span": [
+          9,
+          18
+        ],
+        "span_text": "\"probe-3\"",
+        "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+      },
+      {
+        "name": "attempt_id",
+        "type": "string",
+        "value": "att-0041",
+        "span": [
+          32,
+          42
+        ],
+        "span_text": "\"att-0041\"",
+        "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+      },
+      {
+        "name": "credits",
+        "type": "int",
+        "value": "1800",
+        "span": [
+          53,
+          57
+        ],
+        "span_text": "1800",
+        "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+      },
+      {
+        "name": "leaf_index",
+        "type": "int",
+        "value": "13",
+        "span": [
+          71,
+          73
+        ],
+        "span_text": "13",
+        "span_sha256": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278"
+      },
+      {
+        "name": "note",
+        "type": "string",
+        "value": "leaf index read from the proof response",
+        "span": [
+          81,
+          122
+        ],
+        "span_text": "\"leaf index read from the proof response\"",
+        "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+      },
+      {
+        "name": "outcome_of",
+        "type": "string",
+        "value": "att-0040",
+        "span": [
+          136,
+          146
+        ],
+        "span_text": "\"att-0040\"",
+        "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+      },
+      {
+        "name": "seq",
+        "type": "int",
+        "value": "41",
+        "span": [
+          153,
+          155
+        ],
+        "span_text": "41",
+        "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+      },
+      {
+        "name": "skew_ms",
+        "type": "int",
+        "value": "250",
+        "span": [
+          166,
+          169
+        ],
+        "span_text": "250",
+        "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+      },
+      {
+        "name": "state",
+        "type": "string",
+        "value": "finished",
+        "span": [
+          178,
+          188
+        ],
+        "span_text": "\"finished\"",
+        "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+      }
+    ],
+    "span_digests_that_differ_from_worked_row": [
+      "leaf_index"
+    ]
+  },
+  "control_rows": [
+    {
+      "name": "insertion-order-keys",
+      "encoder_line": "json.dumps(row, separators=(\",\", \":\"), ensure_ascii=False)",
+      "row": "worked_row",
+      "line_utf8": "{\"seq\":41,\"attempt_id\":\"att-0041\",\"agent\":\"probe-3\",\"state\":\"finished\",\"leaf_index\":12,\"skew_ms\":250,\"credits\":1800,\"outcome_of\":\"att-0040\",\"note\":\"leaf index read from the proof response\"}",
+      "line_hex": "7b22736571223a34312c22617474656d70745f6964223a226174742d30303431222c226167656e74223a2270726f62652d33222c227374617465223a2266696e6973686564222c226c6561665f696e646578223a31322c22736b65775f6d73223a3235302c2263726564697473223a313830302c226f7574636f6d655f6f66223a226174742d30303430222c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365227d",
+      "byte_count": 189,
+      "line_sha256": "3b94007e64ff1bd39bde428d6ae066d03173cacaac47206e5127392e76906c89",
+      "fields": [
+        {
+          "name": "seq",
+          "span": [
+            7,
+            9
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "attempt_id",
+          "span": [
+            23,
+            33
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "agent",
+          "span": [
+            42,
+            51
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "state",
+          "span": [
+            60,
+            70
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        },
+        {
+          "name": "leaf_index",
+          "span": [
+            84,
+            86
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "skew_ms",
+          "span": [
+            97,
+            100
+          ],
+          "span_text": "250",
+          "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+        },
+        {
+          "name": "credits",
+          "span": [
+            111,
+            115
+          ],
+          "span_text": "1800",
+          "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+        },
+        {
+          "name": "outcome_of",
+          "span": [
+            129,
+            139
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "note",
+          "span": [
+            147,
+            188
+          ],
+          "span_text": "\"leaf index read from the proof response\"",
+          "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+        }
+      ],
+      "span_digests_that_differ_from_worked_row": [],
+      "spans_at_other_offsets": [
+        "agent",
+        "attempt_id",
+        "credits",
+        "leaf_index",
+        "note",
+        "outcome_of",
+        "seq",
+        "skew_ms",
+        "state"
+      ]
+    },
+    {
+      "name": "insertion-order-keys+ints-as-floats",
+      "encoder_line": "json.dumps({k: float(v) if is_int(v) else v ...}, separators=(\",\", \":\"), ensure_ascii=False)",
+      "row": "worked_row",
+      "line_utf8": "{\"seq\":41.0,\"attempt_id\":\"att-0041\",\"agent\":\"probe-3\",\"state\":\"finished\",\"leaf_index\":12.0,\"skew_ms\":250.0,\"credits\":1800.0,\"outcome_of\":\"att-0040\",\"note\":\"leaf index read from the proof response\"}",
+      "line_hex": "7b22736571223a34312e302c22617474656d70745f6964223a226174742d30303431222c226167656e74223a2270726f62652d33222c227374617465223a2266696e6973686564222c226c6561665f696e646578223a31322e302c22736b65775f6d73223a3235302e302c2263726564697473223a313830302e302c226f7574636f6d655f6f66223a226174742d30303430222c226e6f7465223a226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365227d",
+      "byte_count": 197,
+      "line_sha256": "ca4d322557210bedebb05b66969826545f1c4a14a77e2815f601046146159dbb",
+      "fields": [
+        {
+          "name": "seq",
+          "span": [
+            7,
+            11
+          ],
+          "span_text": "41.0",
+          "span_sha256": "aae57dbd4a6b14eb112a98a258bd5de68e894b13e89752c57b1b2d9d62d07e54"
+        },
+        {
+          "name": "attempt_id",
+          "span": [
+            25,
+            35
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "agent",
+          "span": [
+            44,
+            53
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "state",
+          "span": [
+            62,
+            72
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        },
+        {
+          "name": "leaf_index",
+          "span": [
+            86,
+            90
+          ],
+          "span_text": "12.0",
+          "span_sha256": "77c52f3feed5acdd119b1f8449d5ccc2d39be94bd0314d5b7302f36e20b6cea9"
+        },
+        {
+          "name": "skew_ms",
+          "span": [
+            101,
+            106
+          ],
+          "span_text": "250.0",
+          "span_sha256": "3df1dc9cdcd0f04ab1b117b6d0a2541083972aed2d05c8b75577bf4a1ce55972"
+        },
+        {
+          "name": "credits",
+          "span": [
+            117,
+            123
+          ],
+          "span_text": "1800.0",
+          "span_sha256": "e187ca9fa2aca75697ea6cf9c0e54878d5f5ac2e42bb992a9d2dd4612aeb51cc"
+        },
+        {
+          "name": "outcome_of",
+          "span": [
+            137,
+            147
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "note",
+          "span": [
+            155,
+            196
+          ],
+          "span_text": "\"leaf index read from the proof response\"",
+          "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+        }
+      ],
+      "span_digests_that_differ_from_worked_row": [
+        "credits",
+        "leaf_index",
+        "seq",
+        "skew_ms"
+      ],
+      "spans_at_other_offsets": [
+        "agent",
+        "attempt_id",
+        "credits",
+        "leaf_index",
+        "note",
+        "outcome_of",
+        "seq",
+        "skew_ms",
+        "state"
+      ]
+    },
+    {
+      "name": "python-default",
+      "encoder_line": "json.dumps(row)",
+      "row": "worked_row",
+      "line_utf8": "{\"seq\": 41, \"attempt_id\": \"att-0041\", \"agent\": \"probe-3\", \"state\": \"finished\", \"leaf_index\": 12, \"skew_ms\": 250, \"credits\": 1800, \"outcome_of\": \"att-0040\", \"note\": \"leaf index read from the proof response\"}",
+      "line_hex": "7b22736571223a2034312c2022617474656d70745f6964223a20226174742d30303431222c20226167656e74223a202270726f62652d33222c20227374617465223a202266696e6973686564222c20226c6561665f696e646578223a2031322c2022736b65775f6d73223a203235302c202263726564697473223a20313830302c20226f7574636f6d655f6f66223a20226174742d30303430222c20226e6f7465223a20226c65616620696e64657820726561642066726f6d207468652070726f6f6620726573706f6e7365227d",
+      "byte_count": 206,
+      "line_sha256": "191cc60b3b3baafb2c3de1499a6c264de15211f6dfc3511f95e1c0d699fe56ac",
+      "fields": [
+        {
+          "name": "seq",
+          "span": [
+            8,
+            10
+          ],
+          "span_text": "41",
+          "span_sha256": "3d914f9348c9cc0ff8a79716700b9fcd4d2f3e711608004eb8f138bcba7f14d9"
+        },
+        {
+          "name": "attempt_id",
+          "span": [
+            26,
+            36
+          ],
+          "span_text": "\"att-0041\"",
+          "span_sha256": "00669259b263010ce51f9cd2e5dd7f3e60f5be1726ae1a54ae00471335e40620"
+        },
+        {
+          "name": "agent",
+          "span": [
+            47,
+            56
+          ],
+          "span_text": "\"probe-3\"",
+          "span_sha256": "2e2a61b652567d3becd63f2be871ab524a9481b61f29b6888af59b690269a97b"
+        },
+        {
+          "name": "state",
+          "span": [
+            67,
+            77
+          ],
+          "span_text": "\"finished\"",
+          "span_sha256": "90fc64195972fafd281e48fad08e72110ae816975649efec66e63b1e8c7bc719"
+        },
+        {
+          "name": "leaf_index",
+          "span": [
+            93,
+            95
+          ],
+          "span_text": "12",
+          "span_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+        },
+        {
+          "name": "skew_ms",
+          "span": [
+            108,
+            111
+          ],
+          "span_text": "250",
+          "span_sha256": "1e472b39b105d349bcd069c4a711b44a2fffb8e274714bb07ecfff69a9a7f67b"
+        },
+        {
+          "name": "credits",
+          "span": [
+            124,
+            128
+          ],
+          "span_text": "1800",
+          "span_sha256": "e49ec846db7527df7ff483009fe61700e6435072c8c5b551ab08f0a13fc45a07"
+        },
+        {
+          "name": "outcome_of",
+          "span": [
+            144,
+            154
+          ],
+          "span_text": "\"att-0040\"",
+          "span_sha256": "5ad20128fa8ab5b07538ec7685ad089b511754a7fce4ccff3f9b717d364a82be"
+        },
+        {
+          "name": "note",
+          "span": [
+            164,
+            205
+          ],
+          "span_text": "\"leaf index read from the proof response\"",
+          "span_sha256": "39838852f3152e848aea6709a122af648c53dc63eb01f799e37b077db1929309"
+        }
+      ],
+      "span_digests_that_differ_from_worked_row": [],
+      "spans_at_other_offsets": [
+        "agent",
+        "attempt_id",
+        "credits",
+        "leaf_index",
+        "note",
+        "outcome_of",
+        "seq",
+        "skew_ms",
+        "state"
+      ]
+    }
+  ],
+  "decoders": [
+    {
+      "line": "worked_row",
+      "line_sha256": "c6c8bca4c471b07ccd15d805d32d37e6cb7cb58ef849f4a1941706127b48879d",
+      "exact_integers": {
+        "credits_after_decoding": "1800",
+        "reencoded_line_sha256": "c6c8bca4c471b07ccd15d805d32d37e6cb7cb58ef849f4a1941706127b48879d",
+        "round_trips": true,
+        "span_digests_that_moved": []
+      },
+      "doubles": {
+        "credits_after_decoding": "1800",
+        "reencoded_line_sha256": "c6c8bca4c471b07ccd15d805d32d37e6cb7cb58ef849f4a1941706127b48879d",
+        "round_trips": true,
+        "span_digests_that_moved": []
+      }
+    },
+    {
+      "line": "int-above-2^53, typed as a string (the published form)",
+      "line_sha256": "ff30c087476440cc46e08e8368790868db477a17fa9f3d0b38b0fca14ef33996",
+      "exact_integers": {
+        "credits_after_decoding": "9007199254740993",
+        "reencoded_line_sha256": "ff30c087476440cc46e08e8368790868db477a17fa9f3d0b38b0fca14ef33996",
+        "round_trips": true,
+        "span_digests_that_moved": []
+      },
+      "doubles": {
+        "credits_after_decoding": "9007199254740993",
+        "reencoded_line_sha256": "ff30c087476440cc46e08e8368790868db477a17fa9f3d0b38b0fca14ef33996",
+        "round_trips": true,
+        "span_digests_that_moved": []
+      }
+    },
+    {
+      "line": "int-above-2^53, written as a bare number (not the published form)",
+      "line_sha256": "f0615ab66d3256804842e389faf67ceeaa42be2a38cf32a33fce1ae2c55f61fe",
+      "exact_integers": {
+        "credits_after_decoding": "9007199254740993",
+        "reencoded_line_sha256": "f0615ab66d3256804842e389faf67ceeaa42be2a38cf32a33fce1ae2c55f61fe",
+        "round_trips": true,
+        "span_digests_that_moved": []
+      },
+      "doubles": {
+        "credits_after_decoding": "9007199254740992",
+        "reencoded_line_sha256": "70a35f7a250103fabf34709053f9bd82ed306f612cd484e69d3c2af6d1a8f7cd",
+        "round_trips": false,
+        "span_digests_that_moved": [
+          "credits"
+        ]
+      }
+    }
+  ],
+  "chain": {
+    "head_rule": "head = sha256 of the canonical line of {\"encoder\": version, \"index\": n, \"prev\": previous head or null, \"row_sha256\": sha256 of row n}",
+    "rows": [
+      "worked_row",
+      "null",
+      "negative-int",
+      "int-above-2^53",
+      "empty-string",
+      "non-ascii"
+    ],
+    "heads": [
+      {
+        "index": 0,
+        "head_line_utf8": "{\"encoder\":\"example-row-json/1\",\"index\":0,\"prev\":null,\"row_sha256\":\"c6c8bca4c471b07ccd15d805d32d37e6cb7cb58ef849f4a1941706127b48879d\"}",
+        "byte_count": 134,
+        "head": "92f4f627b5c8d0b4f56c216b556df0450f80d6143051a244e6f11fd659e6921f"
+      },
+      {
+        "index": 1,
+        "head_line_utf8": "{\"encoder\":\"example-row-json/1\",\"index\":1,\"prev\":\"92f4f627b5c8d0b4f56c216b556df0450f80d6143051a244e6f11fd659e6921f\",\"row_sha256\":\"438591633acd5817aa366d44d367afc51c821f151e209547340886386fb453c7\"}",
+        "byte_count": 196,
+        "head": "52827dde6f384d17e4748d2332b367224a29f8aaf8123ea4133c2ce1a62f960b"
+      },
+      {
+        "index": 2,
+        "head_line_utf8": "{\"encoder\":\"example-row-json/1\",\"index\":2,\"prev\":\"52827dde6f384d17e4748d2332b367224a29f8aaf8123ea4133c2ce1a62f960b\",\"row_sha256\":\"27f5bb9313c0e2f86137ffe5455f83a66a2cec2b2b92c9e777e651c260a08b2e\"}",
+        "byte_count": 196,
+        "head": "c734a5fbd15b8b0c92b45db3dc5c4e2ba5b475fd3df98d3c8558e4a3b7c6e608"
+      },
+      {
+        "index": 3,
+        "head_line_utf8": "{\"encoder\":\"example-row-json/1\",\"index\":3,\"prev\":\"c734a5fbd15b8b0c92b45db3dc5c4e2ba5b475fd3df98d3c8558e4a3b7c6e608\",\"row_sha256\":\"ff30c087476440cc46e08e8368790868db477a17fa9f3d0b38b0fca14ef33996\"}",
+        "byte_count": 196,
+        "head": "05de6f00bc8ee3ff27f2cec2be136a40b5c50a544073b28892c2944d7e3f260e"
+      },
+      {
+        "index": 4,
+        "head_line_utf8": "{\"encoder\":\"example-row-json/1\",\"index\":4,\"prev\":\"05de6f00bc8ee3ff27f2cec2be136a40b5c50a544073b28892c2944d7e3f260e\",\"row_sha256\":\"1bf8d1f81c27c71bf7232c58382c0a25736cb7aa9aa4734c65bae50c17057f1a\"}",
+        "byte_count": 196,
+        "head": "ee553f2d24a6dd9b3a453b82a85dd9e1a5a4d05ea421717643a92c8d0c5dc4d7"
+      },
+      {
+        "index": 5,
+        "head_line_utf8": "{\"encoder\":\"example-row-json/1\",\"index\":5,\"prev\":\"ee553f2d24a6dd9b3a453b82a85dd9e1a5a4d05ea421717643a92c8d0c5dc4d7\",\"row_sha256\":\"04530cc1a3ef695737fece5a22c76b1d1ae9e49caa09d0918595f97404544900\"}",
+        "byte_count": 196,
+        "head": "0b608379ce133abb678fefd9df854f834a128550c9c737929c081c17dc120b01"
+      }
+    ],
+    "heads_with_near_miss_as_row_0": [
+      "3a3eaf6a66415b3f53aae05b893882a2c3e74d4eb6a14a4c10546bda279d3dde",
+      "f28a02cfe5b99057c7bc29b67d1fef8e8264f6b55aae98c4910f7d4de51f01b2",
+      "e7dfb74d745ee7099c058fe03bec6edeb82a1cc7cdd34cfabbf3da0e4eef7c2b",
+      "946f8fa88ec814e198d40f5bbee473ef742987f40b6c495c66743db18f138c20",
+      "f1a9ae0a20d2d76cd48ef32c8f781c3a3a2f403fedb8e83065347113d74bd0dd",
+      "25ef9a889e78537982f54807ffbf3be14e0b1845947512225ca57e56f21b22ec"
+    ],
+    "heads_with_encoder_version_2": [
+      "94fb931f135e34f9b76c0bf3c325e450bba8aa557f44bb4ecbb2009d2881a3c9",
+      "2e5f2969e42259dbd04c407633d98742e7b4247e7448e8d355829f19967bf70c",
+      "565803cbfbb098d780c19870c1bd09fef0cdb7f31cc9d2ff0b7191ec40ee4029",
+      "6cba0604bece405e83eb86267a812ef29b2c20aa58cba29f37d4e729d3377dca",
+      "035ef5b7ca4ecbb7715b7de2f06ebbec06a1fe1f564d8d1ab72979f6ba911532",
+      "c2e8396789161bddc7ca2cf81334c5077ad5d0185b8fae60e353122c99464edf"
+    ]
+  }
+}
