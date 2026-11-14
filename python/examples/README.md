@@ -62,6 +62,24 @@ model, otherwise the store runs in exact mode and says so):
 python python/examples/outcomes_demo.py --model models/bge-small-en-v1.5_onnx/model.onnx
 ```
 
+### canonical_row.py
+
+A worked example for hashing a record's canonical bytes (see [docs/canonical-row.md](../../docs/canonical-row.md)).
+Needs only the standard library; the prestige package is used by `--store` alone.
+- Encodes one row as a canonical line and prints its hex, byte count and SHA-256
+- Prints each field's value, byte span in the line and the SHA-256 of that span
+- Edge rows (null, negative integer, integer above 2^53, empty string, non-ASCII text) and a near-miss row
+- Control rows: the same row through wrong-but-plausible encoders, with their hashes
+- Two decoders (exact integers, doubles) and a chain of heads
+- `--check` recomputes everything against `examples/canonical_row_vectors.json`; `--compare <hex>` diagnoses a line
+  from your own encoder
+
+Run (from the repository root):
+```bash
+python python/examples/canonical_row.py
+python python/examples/canonical_row.py --check
+```
+
 ## Creating Your Own Examples
 
 The Python bindings provide a simple, Pythonic interface:
