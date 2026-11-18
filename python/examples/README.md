@@ -62,6 +62,21 @@ model, otherwise the store runs in exact mode and says so):
 python python/examples/outcomes_demo.py --model models/bge-small-en-v1.5_onnx/model.onnx
 ```
 
+### normalization_fixture.py
+
+Runs `examples/normalization_fixture.tsv` against the library and prints pass/fail per row
+(see [docs/normalization-fixture.md](../../docs/normalization-fixture.md)):
+- Dedup key of each input under each `NormalizationMode`, checked against SHA-256 of the expected key input
+- Which rows share a key, including the precomposed and combining e-acute that do not
+- The bytes `get()` returns after the rows are written in table order
+- The raw byte span of every code point, each checked on its own
+
+Run (from the repository root):
+```bash
+python python/examples/normalization_fixture.py
+python python/examples/normalization_fixture.py --table-only   # table self-consistency, no library needed
+```
+
 ## Creating Your Own Examples
 
 The Python bindings provide a simple, Pythonic interface:
