@@ -1,0 +1,37 @@
+row	mode	input_hex	spans	expected_stored_hex	expected_digest_input_hex	key_class	input
+N1	none	48656c6c6f20576f726c64	0+1:U+0048:kept 1+1:U+0065:kept 2+1:U+006C:kept 3+1:U+006C:kept 4+1:U+006F:kept 5+1:U+0020:kept 6+1:U+0057:kept 7+1:U+006F:kept 8+1:U+0072:kept 9+1:U+006C:kept 10+1:U+0064:kept	48656c6c6f20576f726c64	48656c6c6f20576f726c64	N-K1	"Hello World"
+N2	none	202068656c6c6f2020776f726c64	0+1:U+0020:kept 1+1:U+0020:kept 2+1:U+0068:kept 3+1:U+0065:kept 4+1:U+006C:kept 5+1:U+006C:kept 6+1:U+006F:kept 7+1:U+0020:kept 8+1:U+0020:kept 9+1:U+0077:kept 10+1:U+006F:kept 11+1:U+0072:kept 12+1:U+006C:kept 13+1:U+0064:kept	202068656c6c6f2020776f726c64	202068656c6c6f2020776f726c64	N-K2	"  hello  world" (two leading spaces, two between the words)
+N3	none	48454c4c4f20574f524c44	0+1:U+0048:kept 1+1:U+0045:kept 2+1:U+004C:kept 3+1:U+004C:kept 4+1:U+004F:kept 5+1:U+0020:kept 6+1:U+0057:kept 7+1:U+004F:kept 8+1:U+0052:kept 9+1:U+004C:kept 10+1:U+0044:kept	48454c4c4f20574f524c44	48454c4c4f20574f524c44	N-K3	"HELLO WORLD"
+N4	none	c3a9	0+2:U+00E9:kept	c3a9	c3a9	N-K4	U+00E9, precomposed e-acute
+N5	none	65cc81	0+1:U+0065:kept 1+2:U+0301:kept	65cc81	65cc81	N-K5	U+0065 U+0301, e followed by combining acute
+N6	none	c389	0+2:U+00C9:kept	c389	c389	N-K6	U+00C9, precomposed capital E-acute
+N7	none	45cc81	0+1:U+0045:kept 1+2:U+0301:kept	45cc81	45cc81	N-K7	U+0045 U+0301, capital E followed by combining acute
+N8	none	efac81	0+3:U+FB01:kept	efac81	efac81	N-K8	U+FB01, the fi ligature
+N9	none	6669	0+1:U+0066:kept 1+1:U+0069:kept	6669	6669	N-K9	"fi"
+W1	whitespace	48656c6c6f20576f726c64	0+1:U+0048:kept 1+1:U+0065:kept 2+1:U+006C:kept 3+1:U+006C:kept 4+1:U+006F:kept 5+1:U+0020:ws>20 6+1:U+0057:kept 7+1:U+006F:kept 8+1:U+0072:kept 9+1:U+006C:kept 10+1:U+0064:kept	48656c6c6f20576f726c64	48656c6c6f20576f726c64	W-K1	"Hello World"
+W2	whitespace	202068656c6c6f2020776f726c64	0+1:U+0020:ws> 1+1:U+0020:ws> 2+1:U+0068:kept 3+1:U+0065:kept 4+1:U+006C:kept 5+1:U+006C:kept 6+1:U+006F:kept 7+1:U+0020:ws>20 8+1:U+0020:ws> 9+1:U+0077:kept 10+1:U+006F:kept 11+1:U+0072:kept 12+1:U+006C:kept 13+1:U+0064:kept	202068656c6c6f2020776f726c64	68656c6c6f20776f726c64	W-K2	"  hello  world" (two leading spaces, two between the words)
+W3	whitespace	48454c4c4f20574f524c44	0+1:U+0048:kept 1+1:U+0045:kept 2+1:U+004C:kept 3+1:U+004C:kept 4+1:U+004F:kept 5+1:U+0020:ws>20 6+1:U+0057:kept 7+1:U+004F:kept 8+1:U+0052:kept 9+1:U+004C:kept 10+1:U+0044:kept	48454c4c4f20574f524c44	48454c4c4f20574f524c44	W-K3	"HELLO WORLD"
+W4	whitespace	c3a9	0+2:U+00E9:kept	c3a9	c3a9	W-K4	U+00E9, precomposed e-acute
+W5	whitespace	65cc81	0+1:U+0065:kept 1+2:U+0301:kept	65cc81	65cc81	W-K5	U+0065 U+0301, e followed by combining acute
+W6	whitespace	c389	0+2:U+00C9:kept	c389	c389	W-K6	U+00C9, precomposed capital E-acute
+W7	whitespace	45cc81	0+1:U+0045:kept 1+2:U+0301:kept	45cc81	45cc81	W-K7	U+0045 U+0301, capital E followed by combining acute
+W8	whitespace	efac81	0+3:U+FB01:kept	efac81	efac81	W-K8	U+FB01, the fi ligature
+W9	whitespace	6669	0+1:U+0066:kept 1+1:U+0069:kept	6669	6669	W-K9	"fi"
+A1	ascii	48656c6c6f20576f726c64	0+1:U+0048:folded>68 1+1:U+0065:kept 2+1:U+006C:kept 3+1:U+006C:kept 4+1:U+006F:kept 5+1:U+0020:ws>20 6+1:U+0057:folded>77 7+1:U+006F:kept 8+1:U+0072:kept 9+1:U+006C:kept 10+1:U+0064:kept	48656c6c6f20576f726c64	68656c6c6f20776f726c64	A-K1	"Hello World"
+A2	ascii	202068656c6c6f2020776f726c64	0+1:U+0020:ws> 1+1:U+0020:ws> 2+1:U+0068:kept 3+1:U+0065:kept 4+1:U+006C:kept 5+1:U+006C:kept 6+1:U+006F:kept 7+1:U+0020:ws>20 8+1:U+0020:ws> 9+1:U+0077:kept 10+1:U+006F:kept 11+1:U+0072:kept 12+1:U+006C:kept 13+1:U+0064:kept	48656c6c6f20576f726c64	68656c6c6f20776f726c64	A-K1	"  hello  world" (two leading spaces, two between the words)
+A3	ascii	48454c4c4f20574f524c44	0+1:U+0048:folded>68 1+1:U+0045:folded>65 2+1:U+004C:folded>6c 3+1:U+004C:folded>6c 4+1:U+004F:folded>6f 5+1:U+0020:ws>20 6+1:U+0057:folded>77 7+1:U+004F:folded>6f 8+1:U+0052:folded>72 9+1:U+004C:folded>6c 10+1:U+0044:folded>64	48656c6c6f20576f726c64	68656c6c6f20776f726c64	A-K1	"HELLO WORLD"
+A4	ascii	c3a9	0+2:U+00E9:kept	c3a9	c3a9	A-K2	U+00E9, precomposed e-acute
+A5	ascii	65cc81	0+1:U+0065:kept 1+2:U+0301:kept	65cc81	65cc81	A-K3	U+0065 U+0301, e followed by combining acute
+A6	ascii	c389	0+2:U+00C9:kept	c389	c389	A-K4	U+00C9, precomposed capital E-acute
+A7	ascii	45cc81	0+1:U+0045:folded>65 1+2:U+0301:kept	65cc81	65cc81	A-K3	U+0045 U+0301, capital E followed by combining acute
+A8	ascii	efac81	0+3:U+FB01:kept	efac81	efac81	A-K5	U+FB01, the fi ligature
+A9	ascii	6669	0+1:U+0066:kept 1+1:U+0069:kept	6669	6669	A-K6	"fi"
+U1	unicode	48656c6c6f20576f726c64	0+1:U+0048:folded>68 1+1:U+0065:kept 2+1:U+006C:kept 3+1:U+006C:kept 4+1:U+006F:kept 5+1:U+0020:ws>20 6+1:U+0057:folded>77 7+1:U+006F:kept 8+1:U+0072:kept 9+1:U+006C:kept 10+1:U+0064:kept	48656c6c6f20576f726c64	68656c6c6f20776f726c64	U-K1	"Hello World"
+U2	unicode	202068656c6c6f2020776f726c64	0+1:U+0020:ws> 1+1:U+0020:ws> 2+1:U+0068:kept 3+1:U+0065:kept 4+1:U+006C:kept 5+1:U+006C:kept 6+1:U+006F:kept 7+1:U+0020:ws>20 8+1:U+0020:ws> 9+1:U+0077:kept 10+1:U+006F:kept 11+1:U+0072:kept 12+1:U+006C:kept 13+1:U+0064:kept	48656c6c6f20576f726c64	68656c6c6f20776f726c64	U-K1	"  hello  world" (two leading spaces, two between the words)
+U3	unicode	48454c4c4f20574f524c44	0+1:U+0048:folded>68 1+1:U+0045:folded>65 2+1:U+004C:folded>6c 3+1:U+004C:folded>6c 4+1:U+004F:folded>6f 5+1:U+0020:ws>20 6+1:U+0057:folded>77 7+1:U+004F:folded>6f 8+1:U+0052:folded>72 9+1:U+004C:folded>6c 10+1:U+0044:folded>64	48656c6c6f20576f726c64	68656c6c6f20776f726c64	U-K1	"HELLO WORLD"
+U4	unicode	c3a9	0+2:U+00E9:kept	c3a9	c3a9	U-K2	U+00E9, precomposed e-acute
+U5	unicode	65cc81	0+1:U+0065:kept 1+2:U+0301:kept	65cc81	65cc81	U-K3	U+0065 U+0301, e followed by combining acute
+U6	unicode	c389	0+2:U+00C9:folded>c3a9	c3a9	c3a9	U-K2	U+00C9, precomposed capital E-acute
+U7	unicode	45cc81	0+1:U+0045:folded>65 1+2:U+0301:kept	65cc81	65cc81	U-K3	U+0045 U+0301, capital E followed by combining acute
+U8	unicode	efac81	0+3:U+FB01:mapped>6669	efac81	6669	U-K4	U+FB01, the fi ligature
+U9	unicode	6669	0+1:U+0066:kept 1+1:U+0069:kept	efac81	6669	U-K4	"fi"

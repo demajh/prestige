@@ -174,6 +174,7 @@ skill format: `https://raw.githubusercontent.com/demajh/prestige/main/skill.md`.
 | [Outcomes Demo](docs/outcomes-demo.md) | Worked example: per-family false-accept rates and suggested thresholds from a synthetic workload |
 | [Semantic Dedup](docs/semantic-dedup.md) | Neural embedding-based deduplication |
 | [Normalization](docs/normalization.md) | Text normalization options |
+| [Normalization Fixture](docs/normalization-fixture.md) | Table of inputs with expected dedup keys and stored bytes, and a script that checks it row by row |
 | [Observability](docs/observability.md) | Metrics and tracing |
 
 ## License

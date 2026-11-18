@@ -377,22 +377,29 @@ with prestige.open("/tmp/mydb", options) as store:
 
 #### NormalizationMode
 
-- `NormalizationMode.NONE`: No normalization
-- `NormalizationMode.LOWERCASE`: Convert to lowercase
-- `NormalizationMode.WHITESPACE`: Normalize whitespace
-- `NormalizationMode.FULL`: Lowercase + whitespace normalization
+- `NormalizationMode.NONE`: Exact byte match (default)
+- `NormalizationMode.WHITESPACE`: Collapse whitespace runs to one space, trim the edges
+- `NormalizationMode.ASCII`: Whitespace + ASCII case folding
+- `NormalizationMode.UNICODE`: Whitespace + ASCII + the Unicode mappings listed in [normalization.md](normalization.md)
+
+Normalization applies to the dedup key only; the normalized form is never stored.
 
 **Example:**
 
 ```python
 options = prestige.Options()
-options.dedup_mode = prestige.DedupMode.EXACT
-options.normalization_mode = prestige.NormalizationMode.FULL
+options.normalization_mode = prestige.NormalizationMode.ASCII
 
 with prestige.open("/tmp/mydb", options) as store:
-    store.put("key", "  HELLO  ")
-    # Stored as "hello" due to normalization
+    store.put("a", "  HELLO  ")
+    store.put("b", "hello")          # same dedup key as "a"
+    store.get("a")                   # b"  HELLO  ", stored as written
+    store.get("b")                   # b"  HELLO  ", the first writer's bytes
+    store.count_unique_values()      # 1
 ```
+
+`python/examples/normalization_fixture.py` checks a table of such cases against the library
+([normalization-fixture.md](normalization-fixture.md)).
 
 ### Exceptions
 
